@@ -1,5 +1,3 @@
-use std::os::unix::raw;
-
 use crate::opcode::Opcode;
 
 #[derive(Debug)]
@@ -36,13 +34,9 @@ enum Argument {
 #[derive(Debug)]
 pub struct Instruction {
     /// The opcode of the instruction
-    pub opcode: Opcode,
+    opcode: Opcode,
     /// Non-register arguments to the instruction
     arguments: Vec<Argument>,
-    /// The length of the instruction
-    length: u8 ,
-    /// The offset of the instruction
-    offset: usize,
 }
 
 
@@ -67,12 +61,17 @@ macro_rules! split_word {
 }
 
 impl Instruction {
-    pub fn length(&self) -> u8 {
-        self.length
+    pub fn opcode(&self) -> &Opcode {
+        &self.opcode
     }
 
-    pub fn try_from_raw_bytecode(raw_bytecode: &[u16], offset: usize) -> Result<Option<Self>, &'static str> {
+    pub fn arguments(&self) -> &Vec<Argument> {
+        &self.arguments
+    }
+
+    pub fn try_from_raw_bytecode(raw_bytecode: &[u16], offset: usize) -> Result<Option<(Self, u8)>, &'static str> {
         let raw_bytecode = &raw_bytecode[offset..];
+        let hex_view = raw_bytecode.iter().map(|x| x.to_le_bytes()).flatten().collect::<Vec<u8>>();
         let (opcode_byte, immediate_args) = split_word!(raw_bytecode[0]);
         let opcode = Opcode::try_from(opcode_byte).map_err(|_| "Invalid opcode")?;
 
@@ -101,10 +100,10 @@ impl Instruction {
                 0xfe => (vec![Argument::PackedRegister(immediate_args), Argument::ConstantPoolIndex16(Type::MethodHandle, raw_bytecode[1])], 2),
                 0xff => (vec![Argument::PackedRegister(immediate_args), Argument::ConstantPoolIndex16(Type::MethodPrototype, raw_bytecode[1])], 2),
                 0x1b => (vec![Argument::PackedRegister(immediate_args), Argument::ConstantPoolIndex32(Type::String, concat_words!(raw_bytecode[1], raw_bytecode[2]))], 3),
-                0x24 | 0x25 => (vec![], 3),  // TODO: Parse arguments here
-                0x6e..=0x72 | 0x74..=0x78 => (vec![], 3),  // TODO: Parse arguments here
-                0xfc | 0xfd => (vec![Argument::ConstantPoolIndex16(Type::CallSite, raw_bytecode[2])], 3),  // TODO: Parse registers
-                0xfa | 0xfb => (vec![Argument::ConstantPoolIndex16(Type::Method, raw_bytecode[2]), Argument::ConstantPoolIndex16(Type::Prototype, raw_bytecode[3])], 4),  // TODO: Parse registers
+                0x24 | 0x25 => (vec![Argument::PackedRegister(immediate_args), Argument::ConstantPoolIndex16(Type::Type, raw_bytecode[1]), Argument::WideRegister(raw_bytecode[2])], 3),  // TODO: Ensure correct parsing
+                0x6e..=0x72 | 0x74..=0x78 => (vec![Argument::PackedRegister(immediate_args), Argument::ConstantPoolIndex16(Type::Method, raw_bytecode[1]), Argument::WideRegister(raw_bytecode[2])], 3),  // TODO: Ensure correct parsing
+                0xfc | 0xfd => (vec![Argument::PackedRegister(immediate_args), Argument::ConstantPoolIndex16(Type::CallSite, raw_bytecode[1]), Argument::WideRegister(raw_bytecode[2])], 3),  // TODO: Ensure correct parsing
+                0xfa | 0xfb => (vec![Argument::ConstantPoolIndex16(Type::Method, raw_bytecode[1]), Argument::ConstantPoolIndex16(Type::Prototype, raw_bytecode[3])], 4),  // TODO: Parse registers
                 0x15 | 0x19 => (vec![Argument::PackedRegister(immediate_args), Argument::ImmediateSignedHat(raw_bytecode[1] as i16)], 2),
                 0x14 | 0x17 => (vec![Argument::PackedRegister(immediate_args), Argument::ImmediateSigned32(concat_words!(raw_bytecode[1], raw_bytecode[2]))], 3),
                 0x18 => (vec![Argument::PackedRegister(immediate_args), Argument::ImmediateSigned64(concat_words!(raw_bytecode[1], raw_bytecode[2], raw_bytecode[3], raw_bytecode[4]))], 5),
@@ -116,9 +115,12 @@ impl Instruction {
                 0x32..=0x3d => (vec![Argument::PackedRegister(immediate_args >> 4), Argument::PackedRegister(immediate_args & 0xf), Argument::BranchTarget16(raw_bytecode[1] as i16)], 2),
                 0x26 => (vec![Argument::PackedRegister(immediate_args), Argument::BranchTarget32(concat_words!(raw_bytecode[1], raw_bytecode[2]) as i32)], 3),
                 0x2a..=0x2c => (vec![Argument::BranchTarget32(concat_words!(raw_bytecode[1], raw_bytecode[2]) as i32)], 3),
-                0x3e..=0x43 | 0x73 | 0x79..=0x7a | 0xe3..=0xf9 => return Err("Unimplemented")
+                0x3e..=0x43 | 0x73 | 0x79..=0x7a | 0xe3..=0xf9 => {
+                    println!("{:?}", hex_view);
+                    return Err("Unimplemented") 
+                }
         };
 
-        Ok(Some(Instruction { opcode, arguments, length, offset }))
+        Ok(Some((Instruction { opcode, arguments }, length)))
     }
 }
