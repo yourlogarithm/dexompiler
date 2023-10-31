@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 dex = "0.5.0"
+petgraph = "0.6.4"

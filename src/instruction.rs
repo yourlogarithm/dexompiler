@@ -1,6 +1,9 @@
+use core::fmt;
+use std::error::Error;
+
 use dex::Dex;
 
-use crate::{opcode::Opcode, reference::{Reference, Type}, ref_from_dex};
+use crate::{opcode::Opcode, reference::{Item, Type}};
 
 
 #[derive(Debug)]
@@ -8,7 +11,7 @@ enum Argument {
     PackedRegister(u8),
     WideRegister(u16),
     ImmediateSignedByte(i8),
-    ConstantPoolIndex(Reference),
+    ConstantPoolIndex(Item),
     ImmediateSignedHat(i16),
     ImmediateSigned32(u32),  // i32 or f32
     ImmediateSigned64(u64),    // i64 or f64
@@ -21,6 +24,7 @@ enum Argument {
 
 #[derive(Debug)]
 pub struct Instruction {
+    offset: usize,
     /// The opcode of the instruction
     opcode: Opcode,
     /// Non-register arguments to the instruction
@@ -31,14 +35,14 @@ pub struct Instruction {
 macro_rules! concat_words {
     // Case for concatenating 4 words into u64
     ($a:expr, $b:expr, $c:expr, $d:expr) => {
-        ((($a as u64) << 48) |
-         (($b as u64) << 32) |
-         (($c as u64) << 16) |
-          ($d as u64))
+        ((($b as u64) << 48) |
+         (($a as u64) << 32) |
+         (($d as u64) << 16) |
+          ($c as u64))
     };
     // Case for concatenating 2 words into u32
     ($a:expr, $b:expr) => {
-        (($a as u32) << 16) | ($b as u32)
+        (($b as u32) << 16) | ($a as u32)
     };
 }
 
@@ -46,6 +50,20 @@ macro_rules! split_word {
     ($word:expr) => {
         (($word & 0xff) as _, ($word >> 8) as _)
     };
+}
+
+#[derive(Debug)]
+pub(crate) struct InstructionParsingError {
+    byte: u8,
+    offset: usize,
+}
+
+impl Error for InstructionParsingError {}
+
+impl fmt::Display for InstructionParsingError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Invalid instruction at offset {}: {}", self.offset, self.byte)
+    }
 }
 
 impl Instruction {
@@ -57,11 +75,11 @@ impl Instruction {
         &self.arguments
     }
 
-    pub fn try_from_raw_bytecode<T>(raw_bytecode: &[u16], offset: usize, dex: &Dex<T>) -> Result<Option<(Self, u8)>, &'static str> where T: AsRef<[u8]> {
+    pub fn try_from_raw_bytecode(raw_bytecode: &[u16], offset: usize, dex: &Dex<impl AsRef<[u8]>>) -> Result<Option<(Self, u8)>, InstructionParsingError>  {
         let raw_bytecode = &raw_bytecode[offset..];
         let hex_view = raw_bytecode.iter().map(|x| x.to_le_bytes()).flatten().collect::<Vec<u8>>();
         let (opcode_byte, immediate_args) = split_word!(raw_bytecode[0]);
-        let opcode = Opcode::try_from(opcode_byte).map_err(|_| "Invalid opcode")?;
+        let opcode = Opcode::try_from(opcode_byte).map_err(|_| InstructionParsingError { byte:opcode_byte, offset: offset })?;
 
         let (arguments, length) = match opcode_byte {
             0x0 => {
@@ -81,33 +99,33 @@ impl Instruction {
                     let splitted = split_word!(raw_bytecode[1]); 
                     (vec![Argument::PackedRegister(immediate_args), Argument::PackedRegister(splitted.0), Argument::ImmediateSignedByte(splitted.1)], 2)
                 },
-                0x1a => (vec![Argument::PackedRegister(immediate_args), Argument::ConstantPoolIndex(ref_from_dex!(Type::String, raw_bytecode[1], dex))], 2),
-                0x1c | 0x1f | 0x20 | 0x22 | 0x23 => (vec![Argument::PackedRegister(immediate_args), Argument::ConstantPoolIndex(ref_from_dex!(Type::Type, raw_bytecode[1], dex))], 2),
-                0x52..=0x6d => (vec![Argument::PackedRegister(immediate_args), Argument::ConstantPoolIndex(ref_from_dex!(Type::Field, raw_bytecode[1], dex))], 2),
-                0xfe => (vec![Argument::PackedRegister(immediate_args), Argument::ConstantPoolIndex(ref_from_dex!(Type::MethodHandle, raw_bytecode[1], dex))], 2),
-                0xff => (vec![Argument::PackedRegister(immediate_args), Argument::ConstantPoolIndex(ref_from_dex!(Type::Prototype, raw_bytecode[1], dex))], 2),
-                0x1b => (vec![Argument::PackedRegister(immediate_args), Argument::ConstantPoolIndex(ref_from_dex!(Type::String, concat_words!(raw_bytecode[2], raw_bytecode[1]), dex))], 3),
-                0x24 | 0x25 => (vec![Argument::PackedRegister(immediate_args), Argument::ConstantPoolIndex(ref_from_dex!(Type::Type, raw_bytecode[1], dex)), Argument::WideRegister(raw_bytecode[2])], 3),  // TODO: Ensure correct parsing
-                0x6e..=0x72 | 0x74..=0x78 => (vec![Argument::PackedRegister(immediate_args), Argument::ConstantPoolIndex(ref_from_dex!(Type::Method, raw_bytecode[1], dex)), Argument::WideRegister(raw_bytecode[2])], 3),  // TODO: Ensure correct parsing
-                0xfc | 0xfd => (vec![Argument::PackedRegister(immediate_args), Argument::ConstantPoolIndex(ref_from_dex!(Type::CallSite, raw_bytecode[1], dex)), Argument::WideRegister(raw_bytecode[2])], 3),  // TODO: Ensure correct parsing
-                0xfa | 0xfb => (vec![Argument::ConstantPoolIndex(ref_from_dex!(Type::Method, raw_bytecode[1], dex)), Argument::ConstantPoolIndex(ref_from_dex!(Type::Prototype, raw_bytecode[3], dex))], 4),  // TODO: Parse registers
+                0x1a => (vec![Argument::PackedRegister(immediate_args), Argument::ConstantPoolIndex(Item::from_short_index(Type::String, raw_bytecode[1], dex))], 2),
+                0x1c | 0x1f | 0x20 | 0x22 | 0x23 => (vec![Argument::PackedRegister(immediate_args), Argument::ConstantPoolIndex(Item::from_short_index(Type::Type, raw_bytecode[1], dex))], 2),
+                0x52..=0x6d => (vec![Argument::PackedRegister(immediate_args), Argument::ConstantPoolIndex(Item::from_short_index(Type::Field, raw_bytecode[1], dex))], 2),
+                0xfe => (vec![Argument::PackedRegister(immediate_args), Argument::ConstantPoolIndex(Item::from_short_index(Type::MethodHandle, raw_bytecode[1], dex))], 2),
+                0xff => (vec![Argument::PackedRegister(immediate_args), Argument::ConstantPoolIndex(Item::from_short_index(Type::Prototype, raw_bytecode[1], dex))], 2),
+                0x1b => (vec![Argument::PackedRegister(immediate_args), Argument::ConstantPoolIndex(Item::from_index(Type::String, concat_words!(raw_bytecode[1], raw_bytecode[2]), dex))], 3),
+                0x24 | 0x25 => (vec![Argument::PackedRegister(immediate_args), Argument::ConstantPoolIndex(Item::from_short_index(Type::Type, raw_bytecode[1], dex)), Argument::WideRegister(raw_bytecode[2])], 3),  // TODO: Ensure correct parsing
+                0x6e..=0x72 | 0x74..=0x78 => (vec![Argument::PackedRegister(immediate_args), Argument::ConstantPoolIndex(Item::from_short_index(Type::Method, raw_bytecode[1], dex)), Argument::WideRegister(raw_bytecode[2])], 3),  // TODO: Ensure correct parsing
+                0xfc | 0xfd => (vec![Argument::PackedRegister(immediate_args), Argument::ConstantPoolIndex(Item::from_short_index(Type::CallSite, raw_bytecode[1], dex)), Argument::WideRegister(raw_bytecode[2])], 3),  // TODO: Ensure correct parsing
+                0xfa | 0xfb => (vec![Argument::ConstantPoolIndex(Item::from_short_index(Type::Method, raw_bytecode[1], dex)), Argument::ConstantPoolIndex(Item::from_short_index(Type::Prototype, raw_bytecode[3], dex))], 4),  // TODO: Parse registers
                 0x15 | 0x19 => (vec![Argument::PackedRegister(immediate_args), Argument::ImmediateSignedHat(raw_bytecode[1] as i16)], 2),
-                0x14 | 0x17 => (vec![Argument::PackedRegister(immediate_args), Argument::ImmediateSigned32(concat_words!(raw_bytecode[2], raw_bytecode[1]))], 3),
-                0x18 => (vec![Argument::PackedRegister(immediate_args), Argument::ImmediateSigned64(concat_words!(raw_bytecode[4], raw_bytecode[3], raw_bytecode[2], raw_bytecode[1]))], 5),
+                0x14 | 0x17 => (vec![Argument::PackedRegister(immediate_args), Argument::ImmediateSigned32(concat_words!(raw_bytecode[1], raw_bytecode[2]))], 3),
+                0x18 => (vec![Argument::PackedRegister(immediate_args), Argument::ImmediateSigned64(concat_words!(raw_bytecode[1], raw_bytecode[2], raw_bytecode[3], raw_bytecode[4]))], 5),
                 0x12 => (vec![Argument::PackedRegister(immediate_args >> 4), Argument::ImmediateSignedNibble((immediate_args & 0xf) as i8)], 1),
                 0x13 | 0x16 => (vec![Argument::PackedRegister(immediate_args), Argument::ImmediateSignedShort(raw_bytecode[1] as i16)], 2), 
                 0xd0..=0xd7 => (vec![Argument::PackedRegister(immediate_args >> 4), Argument::PackedRegister(immediate_args & 0xf), Argument::ImmediateSignedShort(raw_bytecode[1] as i16)], 2),
                 0x28 => (vec![Argument::BranchTarget8(immediate_args as i8)], 1),
                 0x29 => (vec![Argument::BranchTarget16(raw_bytecode[1] as i16)], 2),
                 0x32..=0x3d => (vec![Argument::PackedRegister(immediate_args >> 4), Argument::PackedRegister(immediate_args & 0xf), Argument::BranchTarget16(raw_bytecode[1] as i16)], 2),
-                0x26 => (vec![Argument::PackedRegister(immediate_args), Argument::BranchTarget32(concat_words!(raw_bytecode[2], raw_bytecode[1]) as i32)], 3),
-                0x2a..=0x2c => (vec![Argument::BranchTarget32(concat_words!(raw_bytecode[2], raw_bytecode[1]) as i32)], 3),
+                0x26 => (vec![Argument::PackedRegister(immediate_args), Argument::BranchTarget32(concat_words!(raw_bytecode[1], raw_bytecode[2]) as i32)], 3),
+                0x2a..=0x2c => (vec![Argument::BranchTarget32(concat_words!(raw_bytecode[1], raw_bytecode[2]) as i32)], 3),
                 0x3e..=0x43 | 0x73 | 0x79..=0x7a | 0xe3..=0xf9 => {
                     println!("{:?}", hex_view);
-                    return Err("Unimplemented") 
+                    return Err(InstructionParsingError { byte: opcode_byte, offset: offset });
                 }
         };
 
-        Ok(Some((Instruction { opcode, arguments }, length)))
+        Ok(Some((Instruction { offset, opcode, arguments }, length)))
     }
 }
