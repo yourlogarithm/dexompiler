@@ -1,8 +1,8 @@
-use std::{rc::Rc, cell::RefCell, collections::HashMap};
+use std::{rc::Rc, cell::RefCell, collections::{HashMap, HashSet}};
 
 use dex::Dex;
 use petgraph::prelude::DiGraph;
-use crate::{instruction::Instruction, block::{BasicBlock, BlockContainer, BlockType}};
+use crate::{instruction::Instruction, block::{BasicBlock, BlockContainer}};
 
 
 #[derive(Debug)]
@@ -12,18 +12,22 @@ pub struct ControlFlowGraph {
 
 impl ControlFlowGraph {
     pub(crate) fn from_dex(dex: Dex<impl AsRef<[u8]>>) -> Self {
-        let class_count = dex.classes().count();
-        for (class_idx, class) in dex.classes().enumerate() {
+        for class in dex.classes() {
             if let Ok(class) = class {
-                let method_count = class.methods().count();
-                for (method_idx, method) in class.methods().enumerate() {
+                for method in class.methods() {
                     println!("{}", class.jtype().type_descriptor().to_string() + method.name());
-                    if ("Lorg/bouncycastle/crypto/util/PrivateKeyInfoFactory;createPrivateKeyInfo" == class.jtype().type_descriptor().to_string() + method.name()) {
-                        println!("");
+                    if class.jtype().type_descriptor().to_string() + method.name() == "Lorg/fdroid/fdroid/views/main/MainActivity;onStart" {
+                        println!("break here");
                     }
                     if let Some(code) = method.code() {
                         let raw_bytecode = code.insns();
                         let blocks = Self::get_blocks(&dex, raw_bytecode);
+                        for (i, block) in blocks.iter().enumerate() {
+                            println!("\n  Block #{}", i);
+                            for inst in block.borrow().instructions() {
+                                println!("    {:?}", inst);
+                            }
+                        }
                     }
                 }
             }
@@ -35,15 +39,19 @@ impl ControlFlowGraph {
         let mut block_container = BlockContainer::new();
         let mut offsets = vec![0];
         let mut block = block_container.get_block_at_offset(0);
-        let binding = block.clone();
-        let mut borrowed_block = binding.borrow_mut();
         while !offsets.is_empty() {
             let offset = offsets.pop().unwrap();
+            if block_container.offsets.contains(&offset) {
+                block = block_container.get_block_at_offset(offset);
+            }
+            let binding = block.clone();
+            let mut borrowed_block = binding.borrow_mut();
             if offset >= raw_bytecode.len() {
                 break;
             }
             if let Some(inst) = Instruction::try_from_raw_bytecode(&raw_bytecode, offset, &dex).unwrap() {
-                offsets.push(offset + inst.length as usize);
+                let new_offset = offset + inst.length as usize;
+                offsets.push(new_offset);
                 borrowed_block.push(inst);
                 let inst = borrowed_block.instructions().last().unwrap();
                 if inst.is_terminator() {
@@ -51,13 +59,12 @@ impl ControlFlowGraph {
                         let successor = block_container.get_block_at_offset(jump_target);
                         borrowed_block.add_succ(successor.clone());
                         successor.borrow_mut().add_prev(block.clone());
-                        offsets.push(jump_target);
                     }
-                    block = block_container.get_block_at_offset(offsets.last().unwrap().clone());
+                    block = block_container.get_block_at_offset(new_offset);
                 }
             }
         }
-        let BlockContainer { blocks } = block_container;
+        let BlockContainer { blocks, offsets: _ } = block_container;
         blocks
     }
 }

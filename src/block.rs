@@ -1,8 +1,9 @@
-use std::{rc::Rc, cell::RefCell, fmt};
+use std::{rc::Rc, cell::RefCell, fmt, collections::{HashMap, HashSet}};
 
 use crate::instruction::Instruction;
 
 pub struct BasicBlock {
+    pub offset: usize,
     prev: Vec<Rc<RefCell<BasicBlock>>>,
     instructions: Vec<Instruction>,
     succ: Vec<Rc<RefCell<BasicBlock>>>,
@@ -19,8 +20,8 @@ impl fmt::Debug for BasicBlock {
 }
 
 impl BasicBlock {
-    pub fn new() -> Rc<RefCell<Self>> {
-        Rc::new(RefCell::new(Self { prev: vec![], instructions: vec![], succ: vec![] }))
+    pub fn new(offset: usize) -> Rc<RefCell<Self>> {
+        Rc::new(RefCell::new(Self { offset, prev: vec![], instructions: vec![], succ: vec![] }))
     }
 
     pub fn prev(&self) -> &[Rc<RefCell<BasicBlock>>] {
@@ -54,21 +55,16 @@ impl BasicBlock {
 }
 
 
-#[derive(Debug)]
-pub enum BlockType {
-    Empty(Rc<RefCell<BasicBlock>>),
-    Existing(Rc<RefCell<BasicBlock>>)
-}
-
 
 #[derive(Debug)]
 pub struct BlockContainer {
     pub blocks: Vec<Rc<RefCell<BasicBlock>>>,
+    pub offsets: HashSet<usize>
 }
 
 impl BlockContainer {
     pub fn new() -> Self {
-        Self { blocks: vec![] }
+        Self { blocks: vec![], offsets: HashSet::new() }
     }
 
     fn push(&mut self, block: Rc<RefCell<BasicBlock>>) -> Rc<RefCell<BasicBlock>> {
@@ -83,13 +79,12 @@ impl BlockContainer {
     pub fn get_block_at_offset(&mut self, offset: usize) -> Rc<RefCell<BasicBlock>> {
         for block in self.blocks.iter() {
             if let Ok(borrowed) = block.try_borrow() {
-                if let Some(instruction) = borrowed.instructions().first() {
-                    if *instruction.offset() == offset {
-                        return block.clone();
-                    }
+                if borrowed.offset == offset {
+                    return block.clone();
                 }
             }
         }
-        self.push(BasicBlock::new())
+        self.offsets.insert(offset);
+        self.push(BasicBlock::new(offset))
     }
 }
