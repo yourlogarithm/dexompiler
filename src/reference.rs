@@ -1,6 +1,6 @@
 use dex::{string::DexString, jtype::Type as JType, field::FieldIdItem, method::{MethodIdItem, MethodHandleItem, ProtoIdItem}, Dex};
 
-pub(crate) enum Type {
+pub enum Type {
     String,
     Type,
     Field,
@@ -11,7 +11,7 @@ pub(crate) enum Type {
 }
 
 #[derive(Debug)]
-pub(crate) enum Item {
+pub enum Item {
     String(DexString),
     Type(JType),
     Field(FieldIdItem),

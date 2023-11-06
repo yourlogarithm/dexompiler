@@ -2,12 +2,13 @@ use core::fmt;
 use std::error::Error;
 
 use dex::Dex;
+use num_traits::FromPrimitive;
 
 use crate::{opcode::Opcode, reference::{Item, Type}};
 
 
 #[derive(Debug)]
-enum Argument {
+pub enum Argument {
     PackedRegister(u8),
     WideRegister(u16),
     ImmediateSignedByte(i8),
@@ -17,18 +18,19 @@ enum Argument {
     ImmediateSigned64(u64),    // i64 or f64
     ImmediateSignedNibble(i8),
     ImmediateSignedShort(i16),
-    BranchTarget8(i8),
-    BranchTarget16(i16),
-    BranchTarget32(i32),
+    BranchTarget(i32),
 }
 
 #[derive(Debug)]
 pub struct Instruction {
-    offset: usize,
     /// The opcode of the instruction
     opcode: Opcode,
+    /// The offset of the instruction in the method bytecode
+    offset: usize,
     /// Non-register arguments to the instruction
     arguments: Vec<Argument>,
+    /// The length of the instruction in bytes
+    pub length: u8,
 }
 
 
@@ -53,7 +55,7 @@ macro_rules! split_word {
 }
 
 #[derive(Debug)]
-pub(crate) struct InstructionParsingError {
+pub struct InstructionParsingError {
     byte: u8,
     offset: usize,
 }
@@ -66,20 +68,27 @@ impl fmt::Display for InstructionParsingError {
     }
 }
 
+#[derive(Debug)]
+pub struct InstructionMemberError<'a> {
+    instruction: &'a Instruction,
+    member: String
+}
+
+impl Error for InstructionMemberError<'_> {}
+
+impl fmt::Display for InstructionMemberError<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Invalid instruction member {} for instruction {:?}", self.member, self.instruction)
+    }
+}
+
+
 impl Instruction {
-    pub fn opcode(&self) -> &Opcode {
-        &self.opcode
-    }
-
-    pub fn arguments(&self) -> &Vec<Argument> {
-        &self.arguments
-    }
-
-    pub fn try_from_raw_bytecode(raw_bytecode: &[u16], offset: usize, dex: &Dex<impl AsRef<[u8]>>) -> Result<Option<(Self, u8)>, InstructionParsingError>  {
+    pub fn try_from_raw_bytecode(raw_bytecode: &[u16], offset: usize, dex: &Dex<impl AsRef<[u8]>>) -> Result<Option<Self>, InstructionParsingError>  {
         let raw_bytecode = &raw_bytecode[offset..];
         let hex_view = raw_bytecode.iter().map(|x| x.to_le_bytes()).flatten().collect::<Vec<u8>>();
         let (opcode_byte, immediate_args) = split_word!(raw_bytecode[0]);
-        let opcode = Opcode::try_from(opcode_byte).map_err(|_| InstructionParsingError { byte:opcode_byte, offset: offset })?;
+        let opcode: Opcode = FromPrimitive::from_u8(opcode_byte).ok_or(InstructionParsingError { byte: opcode_byte, offset: offset })?;
 
         let (arguments, length) = match opcode_byte {
             0x0 => {
@@ -114,18 +123,55 @@ impl Instruction {
                 0x18 => (vec![Argument::PackedRegister(immediate_args), Argument::ImmediateSigned64(concat_words!(raw_bytecode[1], raw_bytecode[2], raw_bytecode[3], raw_bytecode[4]))], 5),
                 0x12 => (vec![Argument::PackedRegister(immediate_args >> 4), Argument::ImmediateSignedNibble((immediate_args & 0xf) as i8)], 1),
                 0x13 | 0x16 => (vec![Argument::PackedRegister(immediate_args), Argument::ImmediateSignedShort(raw_bytecode[1] as i16)], 2), 
-                0xd0..=0xd7 => (vec![Argument::PackedRegister(immediate_args >> 4), Argument::PackedRegister(immediate_args & 0xf), Argument::ImmediateSignedShort(raw_bytecode[1] as i16)], 2),
-                0x28 => (vec![Argument::BranchTarget8(immediate_args as i8)], 1),
-                0x29 => (vec![Argument::BranchTarget16(raw_bytecode[1] as i16)], 2),
-                0x32..=0x3d => (vec![Argument::PackedRegister(immediate_args >> 4), Argument::PackedRegister(immediate_args & 0xf), Argument::BranchTarget16(raw_bytecode[1] as i16)], 2),
-                0x26 => (vec![Argument::PackedRegister(immediate_args), Argument::BranchTarget32(concat_words!(raw_bytecode[1], raw_bytecode[2]) as i32)], 3),
-                0x2a..=0x2c => (vec![Argument::BranchTarget32(concat_words!(raw_bytecode[1], raw_bytecode[2]) as i32)], 3),
+                0xd0..=0xd7 => (vec![Argument::PackedRegister(immediate_args), Argument::ImmediateSignedShort(raw_bytecode[1] as i16)], 2),
+                0x28 => (vec![Argument::BranchTarget(immediate_args as i32)], 1),
+                0x29 => (vec![Argument::BranchTarget(raw_bytecode[1] as i32)], 2),
+                0x32..=0x3d => (vec![Argument::PackedRegister(immediate_args), Argument::BranchTarget(raw_bytecode[1] as i32)], 2),
+                0x26 => (vec![Argument::PackedRegister(immediate_args), Argument::BranchTarget(concat_words!(raw_bytecode[1], raw_bytecode[2]) as i32)], 3),
+                0x2a => (vec![Argument::BranchTarget(concat_words!(raw_bytecode[1], raw_bytecode[2]) as i32)], 3),
+                0x2b | 0x2c => (vec![Argument::PackedRegister(immediate_args), Argument::BranchTarget(concat_words!(raw_bytecode[1], raw_bytecode[2]) as i32)], 3),
                 0x3e..=0x43 | 0x73 | 0x79..=0x7a | 0xe3..=0xf9 => {
                     println!("{:?}", hex_view);
                     return Err(InstructionParsingError { byte: opcode_byte, offset: offset });
                 }
         };
 
-        Ok(Some((Instruction { offset, opcode, arguments }, length)))
+        Ok(Some(Instruction { offset, opcode, arguments, length } ))
+    }
+
+    pub fn offset(&self) -> &usize {
+        &self.offset
+    }
+
+    fn opcode(&self) -> &Opcode {
+        &self.opcode
+    }
+
+    fn arguments(&self) -> &Vec<Argument> {
+        &self.arguments
+    }
+
+    pub fn is_terminator(&self) -> bool {
+        match *self.opcode() as u8 {
+            0x32..=0x3D | 0x27..=0x2C | 0x0E ..=0x11 => true,
+            _ => false,
+        }
+    }
+
+    pub fn jump_target(&self) -> Option<usize> {
+        match *self.opcode() as u8 {
+            0x28 | 0x29 | 0x2A => {
+                if let Argument::BranchTarget(target) = self.arguments().first().unwrap() {
+                    return Some((*self.offset() as i32 + *target) as usize);
+                }
+            }
+            0x2B | 0x2C | 0x32..=0x3d => {
+                if let Argument::BranchTarget(target) = self.arguments().last().unwrap() {
+                    return Some((*self.offset() as i32 + *target) as usize);
+                }
+            }
+            _ => (),
+        }
+        None
     }
 }

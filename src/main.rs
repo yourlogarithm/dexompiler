@@ -1,6 +1,7 @@
 mod opcode;
 mod instruction;
 mod reference;
+mod block;
 mod graph;
 
 use dex::DexReader;
