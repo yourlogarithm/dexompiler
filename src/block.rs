@@ -1,11 +1,11 @@
-use std::{rc::Rc, cell::RefCell, fmt, collections::{HashMap, HashSet}};
+use std::{rc::Rc, cell::RefCell, fmt, collections::HashSet};
 
 use crate::instruction::Instruction;
 
 pub struct BasicBlock {
     pub offset: usize,
     prev: Vec<Rc<RefCell<BasicBlock>>>,
-    instructions: Vec<Instruction>,
+    instructions: Vec<Rc<Instruction>>,
     succ: Vec<Rc<RefCell<BasicBlock>>>,
 }
 
@@ -40,11 +40,11 @@ impl BasicBlock {
         self.succ.push(block);
     }
     
-    pub fn push(&mut self, instruction: Instruction) {
+    pub fn push(&mut self, instruction: Rc<Instruction>) {
         self.instructions.push(instruction);
     }
 
-    pub fn instructions(&self) -> &[Instruction] {
+    pub fn instructions(&self) -> &[Rc<Instruction>] {
         &self.instructions
     }
 

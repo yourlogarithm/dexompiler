@@ -24,7 +24,7 @@ pub enum Argument {
 #[derive(Debug)]
 pub struct Instruction {
     /// The opcode of the instruction
-    opcode: Opcode,
+    pub opcode: Opcode,
     /// The offset of the instruction in the method bytecode
     offset: usize,
     /// Non-register arguments to the instruction

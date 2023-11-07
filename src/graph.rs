@@ -1,4 +1,4 @@
-use std::{rc::Rc, cell::RefCell, collections::{HashMap, HashSet}};
+use std::{rc::Rc, cell::RefCell};
 
 use dex::Dex;
 use petgraph::prelude::DiGraph;
@@ -53,8 +53,8 @@ impl ControlFlowGraph {
             if let Some(inst) = Instruction::try_from_raw_bytecode(&raw_bytecode, offset, &dex).unwrap() {
                 let new_offset = offset + inst.length as usize;
                 offsets.push(new_offset);
-                borrowed_block.push(inst);
-                let inst = borrowed_block.instructions().last().unwrap();
+                let inst = Rc::new(inst);
+                borrowed_block.push(inst.clone());
                 if inst.is_terminator() {
                     if let Some(jump_target) = inst.jump_target() {
                         let successor = block_container.get_block_at_offset(jump_target);
@@ -63,8 +63,10 @@ impl ControlFlowGraph {
                     }
                     if new_offset < raw_bytecode.len() && raw_bytecode[new_offset] != 0 {
                         let new_block = block_container.get_block_at_offset(new_offset);
-                        borrowed_block.add_succ(new_block.clone());
-                        new_block.borrow_mut().add_prev(block.clone());
+                        if (0x32..0x3D).contains(&(inst.opcode as u8)) {
+                            borrowed_block.add_succ(new_block.clone());
+                            new_block.borrow_mut().add_prev(block.clone());
+                        }
                         block = new_block;
                     }
                 }

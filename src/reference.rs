@@ -31,7 +31,6 @@ impl Item {
             Type::Field => Item::Field(dex.get_field_item(index as u64).expect(format!("failed to get field item at index {}", index).as_str())),
             Type::Method => Item::Method(dex.get_method_item(index as u64).expect(format!("failed to get method item at index {}", index).as_str())),
             Type::Prototype => Item::Prototype(dex.get_proto_item(index as u64).expect(format!("failed to get prototype at index {}", index).as_str())),
-            _ => panic!("Invalid type `t` for `from_short_index`, use `from_long_index`")
         }
     }
 
