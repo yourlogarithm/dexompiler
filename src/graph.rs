@@ -16,11 +16,12 @@ impl ControlFlowGraph {
             if let Ok(class) = class {
                 for method in class.methods() {
                     println!("{}", class.jtype().type_descriptor().to_string() + method.name());
-                    if class.jtype().type_descriptor().to_string() + method.name() == "Lorg/fdroid/fdroid/views/main/MainActivity;onStart" {
-                        println!("break here");
-                    }
+                    // if class.jtype().type_descriptor().to_string() + method.name() == "Lorg/fdroid/fdroid/views/main/MainActivity;onStart" {
+                    //     println!("break here");
+                    // }
                     if let Some(code) = method.code() {
                         let raw_bytecode = code.insns();
+                        println!("  {:?}", raw_bytecode);
                         let blocks = Self::get_blocks(&dex, raw_bytecode);
                         for (i, block) in blocks.iter().enumerate() {
                             println!("\n  Block #{}", i);
@@ -60,7 +61,9 @@ impl ControlFlowGraph {
                         borrowed_block.add_succ(successor.clone());
                         successor.borrow_mut().add_prev(block.clone());
                     }
-                    block = block_container.get_block_at_offset(new_offset);
+                    if new_offset < raw_bytecode.len() && raw_bytecode[new_offset] != 0 {
+                        block = block_container.get_block_at_offset(new_offset);
+                    }
                 }
             }
         }

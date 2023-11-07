@@ -175,3 +175,20 @@ impl Instruction {
         None
     }
 }
+
+
+#[cfg(test)]
+mod test {
+    use dex::DexReader;
+
+    use super::*;
+
+    #[test]
+    fn test_parsing_0() {
+        let raw_bytecode = [8303, 921, 33, 8304, 29798, 33, 10, 56, 3, 14, 8304, 29799, 33, 8304, 29797, 33, 14];
+        let dex = DexReader::from_file("tests/test.dex").unwrap();
+        let instruction = Instruction::try_from_raw_bytecode(&raw_bytecode, 0, &dex).unwrap().expect("Failed to parse instruction");
+        assert_eq!(instruction.opcode(), &Opcode::InvokeSuper);
+        assert_eq!(instruction.arguments()[0], )
+    }
+}
