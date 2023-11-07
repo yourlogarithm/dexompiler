@@ -1,6 +1,6 @@
 use num_derive::FromPrimitive;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, FromPrimitive)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, FromPrimitive, Hash)]
 pub enum Opcode {
     Nop,
     Move,

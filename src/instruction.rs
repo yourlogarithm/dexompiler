@@ -84,6 +84,15 @@ impl fmt::Display for InstructionMemberError<'_> {
 
 
 impl Instruction {
+    pub fn new(opcode: Opcode, offset: usize, arguments: Vec<Argument>, length: u8) -> Self {
+        Instruction {
+            opcode,
+            offset,
+            arguments,
+            length
+        }
+    }
+
     pub fn try_from_raw_bytecode(raw_bytecode: &[u16], offset: usize, dex: &Dex<impl AsRef<[u8]>>) -> Result<Option<Self>, InstructionParsingError>  {
         let raw_bytecode = &raw_bytecode[offset..];
         let hex_view = raw_bytecode.iter().map(|x| x.to_le_bytes()).flatten().collect::<Vec<u8>>();
@@ -136,14 +145,14 @@ impl Instruction {
                 }
         };
 
-        Ok(Some(Instruction { offset, opcode, arguments, length } ))
+        Ok(Some(Instruction::new(opcode, offset, arguments, length)))
     }
 
     pub fn offset(&self) -> &usize {
         &self.offset
     }
 
-    fn opcode(&self) -> &Opcode {
+    pub fn opcode(&self) -> &Opcode {
         &self.opcode
     }
 
