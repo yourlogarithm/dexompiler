@@ -7,7 +7,7 @@ use num_traits::FromPrimitive;
 use crate::{opcode::Opcode, reference::{Item, Type}};
 
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Argument {
     PackedRegister(u8),
     WideRegister(u16),
@@ -180,15 +180,53 @@ impl Instruction {
 #[cfg(test)]
 mod test {
     use dex::DexReader;
-
     use super::*;
 
     #[test]
-    fn test_parsing_0() {
-        let raw_bytecode = [8303, 921, 33, 8304, 29798, 33, 10, 56, 3, 14, 8304, 29799, 33, 8304, 29797, 33, 14];
+    fn test_try_from_raw_bytecode0() {
+        let raw_bytecode = [8303, 921, 33];
         let dex = DexReader::from_file("tests/test.dex").unwrap();
         let instruction = Instruction::try_from_raw_bytecode(&raw_bytecode, 0, &dex).unwrap().expect("Failed to parse instruction");
+        assert!(instruction.length == 3);
         assert_eq!(instruction.opcode(), &Opcode::InvokeSuper);
-        assert_eq!(instruction.arguments()[0], )
+        assert_eq!(instruction.arguments[0], Argument::PackedRegister(0x20));
+        let method_id_item = match &instruction.arguments[1] {
+            Argument::ConstantPoolIndex(Item::Method(method_id_item)) => method_id_item,
+            _ => panic!("Expected method id item")
+        };
+        let method_name = dex.get_string(method_id_item.name_idx()).expect("Failed to get method name").to_string();
+        assert_eq!(method_name, "onNewIntent");
+        assert_eq!(instruction.arguments[2], Argument::WideRegister(33));
+    }
+
+    #[test]
+    fn test_try_from_raw_bytecode1() {
+        let raw_bytecode = [4180, 2901];
+        let dex = DexReader::from_file("tests/test.dex").unwrap();
+        let instruction = Instruction::try_from_raw_bytecode(&raw_bytecode, 0, &dex).unwrap().expect("Failed to parse instruction");
+        assert_eq!(instruction.length, 2);
+        assert_eq!(instruction.opcode(), &Opcode::IgetObject);
+        assert_eq!(instruction.arguments[0], Argument::PackedRegister(0x10));
+        let field_id_item = match &instruction.arguments[1] {
+            Argument::ConstantPoolIndex(Item::Field(field_id_item)) => field_id_item,
+            _ => panic!("Expected field id item")
+        };
+        let field_name = dex.get_string(*field_id_item.name_idx()).expect("Failed to get field name").to_string();
+        assert_eq!(field_name, "message");
+    }
+
+    #[test]
+    fn test_try_from_raw_bytecode2() {
+        let raw_bytecode = [290, 648];
+        let dex = DexReader::from_file("tests/test.dex").unwrap();
+        let instruction = Instruction::try_from_raw_bytecode(&raw_bytecode, 0, &dex).unwrap().expect("Failed to parse instruction");
+        assert_eq!(instruction.length, 2);
+        assert_eq!(instruction.opcode(), &Opcode::NewInstance);
+        assert_eq!(instruction.arguments[0], Argument::PackedRegister(1));
+        let jtype = match &instruction.arguments[1] {
+            Argument::ConstantPoolIndex(Item::Type(jtype)) => jtype,
+            _ => panic!("Expected type id item")
+        };
+        assert_eq!(jtype.to_string(), "Ljava/lang/UnsupportedOperationException;");
     }
 }

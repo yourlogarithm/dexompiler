@@ -10,7 +10,7 @@ pub enum Type {
     CallSite,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Item {
     String(DexString),
     Type(JType),
