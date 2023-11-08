@@ -133,9 +133,9 @@ impl Instruction {
                 0x12 => (vec![Argument::PackedRegister(immediate_args >> 4), Argument::ImmediateSignedNibble((immediate_args & 0xf) as i8)], 1),
                 0x13 | 0x16 => (vec![Argument::PackedRegister(immediate_args), Argument::ImmediateSignedShort(raw_bytecode[1] as i16)], 2), 
                 0xd0..=0xd7 => (vec![Argument::PackedRegister(immediate_args), Argument::ImmediateSignedShort(raw_bytecode[1] as i16)], 2),
-                0x28 => (vec![Argument::BranchTarget(immediate_args as i32)], 1),
-                0x29 => (vec![Argument::BranchTarget(raw_bytecode[1] as i32)], 2),
-                0x32..=0x3d => (vec![Argument::PackedRegister(immediate_args), Argument::BranchTarget(raw_bytecode[1] as i32)], 2),
+                0x28 => (vec![Argument::BranchTarget(immediate_args as i8 as i32)], 1),
+                0x29 => (vec![Argument::BranchTarget(raw_bytecode[1] as i16 as i32)], 2),
+                0x32..=0x3d => (vec![Argument::PackedRegister(immediate_args), Argument::BranchTarget(raw_bytecode[1] as i16 as i32)], 2),
                 0x26 => (vec![Argument::PackedRegister(immediate_args), Argument::BranchTarget(concat_words!(raw_bytecode[1], raw_bytecode[2]) as i32)], 3),
                 0x2a => (vec![Argument::BranchTarget(concat_words!(raw_bytecode[1], raw_bytecode[2]) as i32)], 3),
                 0x2b | 0x2c => (vec![Argument::PackedRegister(immediate_args), Argument::BranchTarget(concat_words!(raw_bytecode[1], raw_bytecode[2]) as i32)], 3),
@@ -158,13 +158,6 @@ impl Instruction {
 
     fn arguments(&self) -> &Vec<Argument> {
         &self.arguments
-    }
-
-    pub fn is_terminator(&self) -> bool {
-        match *self.opcode() as u8 {
-            0x32..=0x3D | 0x27..=0x2C | 0x0E ..=0x11 => true,
-            _ => false,
-        }
     }
 
     pub fn jump_target(&self) -> Option<usize> {
