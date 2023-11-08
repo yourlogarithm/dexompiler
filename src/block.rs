@@ -3,7 +3,7 @@ use std::{rc::Rc, cell::RefCell, fmt, collections::HashSet};
 use crate::instruction::Instruction;
 
 pub struct BasicBlock {
-    pub offset: usize,
+    offset: usize,
     prev: Vec<Rc<RefCell<BasicBlock>>>,
     instructions: Vec<Rc<Instruction>>,
     succ: Vec<Rc<RefCell<BasicBlock>>>,
@@ -48,8 +48,8 @@ impl BasicBlock {
         &self.instructions
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.instructions.is_empty()
+    pub fn visit(&self) {
+        
     }
 
 }

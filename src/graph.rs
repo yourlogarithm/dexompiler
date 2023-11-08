@@ -1,39 +1,45 @@
 use std::{rc::Rc, cell::RefCell};
 
 use dex::Dex;
-use petgraph::prelude::DiGraph;
 use crate::{instruction::Instruction, block::{BasicBlock, BlockContainer}};
+
+#[derive(Debug)]
+struct DexMethod {
+    name: String,
+    entry: Rc<RefCell<BasicBlock>>
+}
 
 
 #[derive(Debug)]
-pub struct ControlFlowGraph {
-    graph: DiGraph<BasicBlock, ()>
+struct DexClass {
+    jtype: String,
+    methods: Vec<DexMethod>,
 }
 
-impl ControlFlowGraph {
+
+#[derive(Debug)]
+pub struct DexControlFlowGraph {
+    classes: Vec<DexClass>,
+}
+
+impl DexControlFlowGraph {
     pub(crate) fn from_dex(dex: Dex<impl AsRef<[u8]>>) -> Self {
+        let mut classes = Vec::new();
         for class in dex.classes() {
             if let Ok(class) = class {
+                let mut methods = Vec::new();
                 for method in class.methods() {
-                    println!("{}", class.jtype().type_descriptor().to_string() + method.name());
-                    // if class.jtype().type_descriptor().to_string() + method.name() == "Lorg/fdroid/fdroid/views/main/MainActivity;onStart" {
-                    //     println!("break here");
-                    // }
                     if let Some(code) = method.code() {
                         let raw_bytecode = code.insns();
-                        println!("  {:?}", raw_bytecode);
                         let blocks = Self::get_blocks(&dex, raw_bytecode);
-                        for (i, block) in blocks.iter().enumerate() {
-                            println!("\n  Block #{}", i);
-                            for inst in block.borrow().instructions() {
-                                println!("    {:?}", inst);
-                            }
-                        }
+                        let entry = blocks.first().unwrap().clone();
+                        methods.push(DexMethod { name: method.name().to_string(), entry: entry });
                     }
                 }
+                classes.push(DexClass { jtype: class.jtype().to_string(), methods: methods });
             }
         }
-        todo!()
+        DexControlFlowGraph { classes }
     }
 
     fn get_blocks(dex: &Dex<impl AsRef<[u8]>>, raw_bytecode: &[u16]) -> Vec<Rc<RefCell<BasicBlock>>> {
@@ -84,7 +90,7 @@ mod test {
 
     use crate::{opcode::Opcode, block::BasicBlock};
 
-    use super::ControlFlowGraph;
+    use super::DexControlFlowGraph;
 
     fn assert_block_starts(opcodes: &[Opcode], blocks: &[Rc<RefCell<BasicBlock>>]) {
         let block_starts: HashSet<Opcode> = blocks.iter().map(|block| *block.borrow().instructions()[0].opcode()).collect();
@@ -97,7 +103,7 @@ mod test {
         // Lorg/fdroid/fdroid/views/main/MainActivity;onStart
         let raw_bytecode = [4207, 743, 2, 96, 57, 275, 33, 4148, 15, 26, 21033, 8305, 855, 2, 266, 312, 7, 8532, 22998, 8302, 714, 1, 14];
         let dex = dex::DexReader::from_file("tests/test.dex").unwrap();
-        let blocks = ControlFlowGraph::get_blocks(&dex, &raw_bytecode);
+        let blocks = DexControlFlowGraph::get_blocks(&dex, &raw_bytecode);
         assert_eq!(4, blocks.len());
         assert_block_starts(
             &[Opcode::InvokeSuper, Opcode::ReturnVoid, Opcode::ConstString, Opcode::IgetObject], 
@@ -119,7 +125,7 @@ mod test {
             7759, 33, 295
         ];
         let dex = dex::DexReader::from_file("tests/test.dex").unwrap();
-        let blocks = ControlFlowGraph::get_blocks(&dex, &raw_bytecode);
+        let blocks = DexControlFlowGraph::get_blocks(&dex, &raw_bytecode);
         assert_eq!(6, blocks.len());
         assert_block_starts(
             &[Opcode::IgetObject, Opcode::InvokeVirtual, Opcode::Const4, Opcode::NewInstance, Opcode::InvokeVirtual, Opcode::MoveException], 
@@ -136,11 +142,23 @@ mod test {
             8533, 11171, 312, 3, 4370, 4272, 15
         ];
         let dex = dex::DexReader::from_file("tests/test.dex").unwrap();
-        let blocks = ControlFlowGraph::get_blocks(&dex, &raw_bytecode);
+        let blocks = DexControlFlowGraph::get_blocks(&dex, &raw_bytecode);
         assert_eq!(6, blocks.len());
         assert_block_starts(
             &[Opcode::IgetObject, Opcode::InvokeVirtual, Opcode::Const4, Opcode::AddInt2Addr, Opcode::AddInt2Addr, Opcode::Const4], 
             &blocks
         );
+    }
+
+    #[test]
+    fn test_entry_block() {
+        let dex = dex::DexReader::from_file("tests/test.dex").unwrap();
+        let cfg = DexControlFlowGraph::from_dex(dex);
+        for class in cfg.classes {
+            for method in class.methods {
+                let borrowed = method.entry.borrow();
+                assert_eq!(borrowed.prev().len(), 0);
+            }
+        }
     }
 }
