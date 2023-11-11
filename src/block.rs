@@ -1,14 +1,12 @@
-use std::{rc::Rc, cell::RefCell, fmt, collections::{HashSet, HashMap}};
+use std::{rc::Rc, cell::RefCell, fmt};
 
 use crate::instruction::Instruction;
 
 pub struct BasicBlock {
     offset: usize,
-    exc_entry: bool,
     prev: Vec<Rc<RefCell<BasicBlock>>>,
     instructions: Vec<Instruction>,
     succ: Vec<Rc<RefCell<BasicBlock>>>,
-    visited: bool,
 }
 
 impl fmt::Debug for BasicBlock {
@@ -22,24 +20,8 @@ impl fmt::Debug for BasicBlock {
 }
 
 impl BasicBlock {
-    pub fn new(offset: usize, exc_entry: bool) -> Rc<RefCell<Self>> {
-        Rc::new(RefCell::new(Self { offset, exc_entry, prev: vec![], instructions: vec![], succ: vec![], visited: false }))
-    }
-
-    pub fn offset(&self) -> usize {
-        self.offset
-    }
-
-    pub fn exc_entry(&self) -> bool {
-        self.exc_entry
-    }
-
-    pub fn prev(&self) -> &Vec<Rc<RefCell<BasicBlock>>> {
-        &self.prev
-    }
-
-    pub fn succ(&self) -> &Vec<Rc<RefCell<BasicBlock>>> {
-        &self.succ
+    pub fn new(offset: usize) -> Rc<RefCell<Self>> {
+        Rc::new(RefCell::new(Self { offset, prev: vec![], instructions: vec![], succ: vec![] }))
     }
 
     pub fn instructions(&self) -> &Vec<Instruction> {
@@ -56,5 +38,10 @@ impl BasicBlock {
 
     pub fn push(&mut self, instruction: Instruction) {
         self.instructions.push(instruction);
+    }
+
+    pub fn to_features(&self) -> Vec<f32> {
+        
+        todo!()
     }
 }

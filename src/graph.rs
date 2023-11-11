@@ -1,7 +1,7 @@
 use std::{rc::Rc, cell::RefCell, collections::{HashSet, HashMap}, vec};
 
 use dex::Dex;
-use crate::{instruction::Instruction, block::BasicBlock, opcode::Opcode};
+use crate::{instruction::Instruction, block::BasicBlock, opcode::Opcode, concat_words};
 
 #[derive(Debug)]
 pub(crate) struct DexMethod {
@@ -49,9 +49,16 @@ impl DexControlFlowGraph {
         let mut classes = Vec::new();
         for class in dex.classes() {
             if let Ok(class) = class {
+                let cname = class.jtype().to_string();
                 let mut methods = Vec::new();
                 for method in class.methods() {
                     if let Some(code) = method.code() {
+                        let mname = method.name().to_string();
+                        let concat = format!("{}::{}", cname, mname);
+                        println!("{}", concat);
+                        if concat == "Lorg/fdroid/fdroid/views/main/LatestAdapter;::onCreateViewHolder" {
+                            println!("here");
+                        }
                         let raw_bytecode = code.insns();
                         let blocks = Self::get_blocks(&dex, raw_bytecode);
                         let entry = blocks.first().unwrap().clone();
@@ -86,6 +93,22 @@ impl DexControlFlowGraph {
                         edges.push((current_block_start, inst.jump_target().unwrap()));
                         block_starts.push(inst.jump_target().unwrap());
                     },
+                    0x2B => {
+                        let jump_target = inst.jump_target().unwrap();
+                        let size = raw_bytecode[jump_target + 1];
+                        let current_offset = *inst.offset();
+                        let current_block_start = *block_starts.last().unwrap();
+                        let targets = &raw_bytecode[jump_target + 4..];
+                        for i in (0..(size as usize * 2)).step_by(2) {
+                            let relative_target = concat_words!(targets[i], targets[i+1]) as i32;
+                            let target = (current_offset as i32 + relative_target) as u32;
+                            block_starts.push(target as usize);
+                            edges.push((current_block_start, target as usize));
+                        }
+                    },
+                    0x2C => {
+                        println!("{}", inst.jump_target().unwrap());
+                    },
                     _ => ()
                 }
                 instructions.push(inst);
@@ -98,7 +121,7 @@ impl DexControlFlowGraph {
         let mut index_mapping = HashMap::new();
         for inst in instructions.into_iter() {
             if block_starts.contains(inst.offset()) {
-                blocks.push(BasicBlock::new(*inst.offset(), *inst.opcode() == Opcode::MoveException));
+                blocks.push(BasicBlock::new(*inst.offset()));
                 index_mapping.insert(*inst.offset(), blocks.len() - 1);
             }
             let mut current_block = blocks.last().expect("No current block").borrow_mut();

@@ -33,7 +33,7 @@ pub struct Instruction {
     length: u8,
 }
 
-
+#[macro_export]
 macro_rules! concat_words {
     // Case for concatenating 4 words into u64
     ($a:expr, $b:expr, $c:expr, $d:expr) => {
