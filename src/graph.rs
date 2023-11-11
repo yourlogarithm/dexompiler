@@ -93,21 +93,22 @@ impl DexControlFlowGraph {
                         edges.push((current_block_start, inst.jump_target().unwrap()));
                         block_starts.push(inst.jump_target().unwrap());
                     },
-                    0x2B => {
+                    0x2B | 0x2C => {
                         let jump_target = inst.jump_target().unwrap();
                         let size = raw_bytecode[jump_target + 1];
                         let current_offset = *inst.offset();
                         let current_block_start = *block_starts.last().unwrap();
-                        let targets = &raw_bytecode[jump_target + 4..];
+                        let targets = if inst.opcode() == &Opcode::PackedSwitch {
+                            &raw_bytecode[jump_target + 4..]
+                        } else {
+                            &raw_bytecode[jump_target + 2 + size as usize * 2..]
+                        };
                         for i in (0..(size as usize * 2)).step_by(2) {
                             let relative_target = concat_words!(targets[i], targets[i+1]) as i32;
                             let target = (current_offset as i32 + relative_target) as u32;
                             block_starts.push(target as usize);
                             edges.push((current_block_start, target as usize));
                         }
-                    },
-                    0x2C => {
-                        println!("{}", inst.jump_target().unwrap());
                     },
                     _ => ()
                 }
