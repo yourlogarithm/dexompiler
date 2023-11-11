@@ -14,7 +14,6 @@ fn main() {
         println!("{}", cls.jtype());
         for method in cls.methods() {
             println!("  {}", method.name());
-            method.visit();
         }
     }
 }

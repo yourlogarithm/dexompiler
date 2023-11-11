@@ -24,13 +24,13 @@ pub enum Argument {
 #[derive(Debug)]
 pub struct Instruction {
     /// The opcode of the instruction
-    pub opcode: Opcode,
+    opcode: Opcode,
     /// The offset of the instruction in the method bytecode
     offset: usize,
     /// Non-register arguments to the instruction
     arguments: Vec<Argument>,
     /// The length of the instruction in bytes
-    pub length: u8,
+    length: u8,
 }
 
 
@@ -158,6 +158,10 @@ impl Instruction {
 
     fn arguments(&self) -> &Vec<Argument> {
         &self.arguments
+    }
+
+    pub fn length(&self) -> &u8 {
+        &self.length
     }
 
     pub fn jump_target(&self) -> Option<usize> {

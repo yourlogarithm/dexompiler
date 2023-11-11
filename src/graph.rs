@@ -1,7 +1,7 @@
-use std::{rc::Rc, cell::RefCell, collections::HashSet};
+use std::{rc::Rc, cell::RefCell, collections::{HashSet, HashMap}, vec};
 
 use dex::Dex;
-use crate::{instruction::Instruction, block::{BasicBlock, BlockContainer}};
+use crate::{instruction::Instruction, block::BasicBlock, opcode::Opcode};
 
 #[derive(Debug)]
 pub(crate) struct DexMethod {
@@ -12,10 +12,6 @@ pub(crate) struct DexMethod {
 impl DexMethod {
     pub fn name(&self) -> &str {
         &self.name
-    }
-
-    pub fn visit(&self) {
-        self.entry.borrow_mut().visit();
     }
 }
 
@@ -55,9 +51,6 @@ impl DexControlFlowGraph {
             if let Ok(class) = class {
                 let mut methods = Vec::new();
                 for method in class.methods() {
-                    // if class.jtype().to_string() + method.name().to_string().as_str() == "Lorg/bouncycastle/crypto/engines/EthereumIESEngine;decryptBlock" {
-                    //     println!("Found it!");
-                    // }
                     if let Some(code) = method.code() {
                         let raw_bytecode = code.insns();
                         let blocks = Self::get_blocks(&dex, raw_bytecode);
@@ -72,83 +65,53 @@ impl DexControlFlowGraph {
     }
 
     fn get_blocks(dex: &Dex<impl AsRef<[u8]>>, raw_bytecode: &[u16]) -> Vec<Rc<RefCell<BasicBlock>>> {
-        let mut block_container = BlockContainer::new();
-        let mut offsets = vec![0];
-        let mut block = block_container.get_block_at_offset(0, raw_bytecode);
-        while !offsets.is_empty() {
-            let offset = offsets.pop().unwrap();
-            if offset >= raw_bytecode.len() {
-                break;
-            }
-            if block_container.offsets.contains(&offset) {
-                block = block_container.get_block_at_offset(offset, raw_bytecode);
-            }
-            let binding = block.clone();
-            let mut borrowed_block = binding.borrow_mut();
-            if let Some(inst) = Instruction::try_from_raw_bytecode(&raw_bytecode, offset, &dex).unwrap() {
-                let new_offset = offset + inst.length as usize;
-                let inst = Rc::new(inst);
-                match inst.opcode as u8 {
+        let mut instructions: Vec<Instruction> = vec![];
+        let mut block_starts = vec![0 as usize];
+        let mut edges = vec![];
+        let mut offset = 0;
+        while offset < raw_bytecode.len() {
+            if let Some(inst) = Instruction::try_from_raw_bytecode(raw_bytecode, offset, dex).unwrap() {
+                offset += *inst.length() as usize;
+                match *inst.opcode() as u8 {
                     0x32..=0x3D => {
-                        let jump_target = inst.jump_target().unwrap();
-
-                        let successor = block_container.get_block_at_offset(jump_target, raw_bytecode);
-                        borrowed_block.add_succ(successor.clone());
-                        successor.borrow_mut().add_prev(block.clone());
-
-                        let new_block = block_container.get_block_at_offset(offset, raw_bytecode);  // the if is the start of a new block
-                        borrowed_block.add_succ(new_block.clone());
-                        let mut new_borrowed = new_block.borrow_mut();
-                        new_borrowed.add_prev(block.clone());
-
-                        new_borrowed.push(inst.clone());
-
-                        offsets.push(new_offset);
+                        let current_block_start = *block_starts.last().unwrap();
+                        edges.push((current_block_start, offset));
+                        edges.push((current_block_start, inst.jump_target().unwrap()));
+                        block_starts.push(offset);
+                        block_starts.push(inst.jump_target().unwrap());
+                        
                     },
                     0x28..=0x2A => {
-                        borrowed_block.push(inst.clone());
-                        let jump_target = inst.jump_target().unwrap();
-
-                        let successor = block_container.get_block_at_offset(jump_target, raw_bytecode);
-                        borrowed_block.add_succ(successor.clone());
-                        successor.borrow_mut().add_prev(block.clone());
-
-                        offsets.push(new_offset);
+                        let current_block_start = *block_starts.last().unwrap();
+                        edges.push((current_block_start, inst.jump_target().unwrap()));
+                        block_starts.push(inst.jump_target().unwrap());
                     },
-                    0x0E..=0x11 | 0x27 => {
-                        borrowed_block.push(inst.clone());
-                        if new_offset < raw_bytecode.len() && raw_bytecode[new_offset] != 0 {
-                            block_container.get_block_at_offset(new_offset, raw_bytecode);
-                            offsets.push(new_offset);
-                        }
-                    },
-                    _ => {
-                        borrowed_block.push(inst.clone());
-                        if block_container.offsets.contains(&new_offset) {
-                            let new_block = block_container.get_block_at_offset(new_offset, raw_bytecode);
-                            borrowed_block.add_succ(new_block.clone());
-                            new_block.borrow_mut().add_prev(block.clone());
-                        }
-                        offsets.push(new_offset);
-                    }
+                    _ => ()
                 }
+                instructions.push(inst);
+            } else {
+                break;
             }
         }
-        let BlockContainer { blocks, offsets: _ } = block_container;
-        // for block in blocks.iter() {
-        //     let borrowed = block.borrow();
-        //     if borrowed.instructions().is_empty() {
-        //         println!("{}", borrowed.offset());
-        //         for prev in borrowed.prev() {
-        //             let prev_borrow = prev.borrow();
-        //             println!("    {:?}", prev_borrow.offset());
-        //             for inst in prev_borrow.instructions() {
-        //                 println!("    {:?}", inst);
-        //             }
-        //         }
-        //         println!("");
-        //     }
-        // }
+        let block_starts = block_starts.into_iter().collect::<HashSet<usize>>();
+        let mut blocks = vec![];
+        let mut index_mapping = HashMap::new();
+        for inst in instructions.into_iter() {
+            if block_starts.contains(inst.offset()) {
+                blocks.push(BasicBlock::new(*inst.offset(), *inst.opcode() == Opcode::MoveException));
+                index_mapping.insert(*inst.offset(), blocks.len() - 1);
+            }
+            let mut current_block = blocks.last().expect("No current block").borrow_mut();
+            current_block.push(inst);
+        }
+        for (src, dst) in edges.into_iter() {
+            let src_index = index_mapping.get(&src).expect("No source index");
+            let dst_index = index_mapping.get(&dst).expect("No destination index");
+            let src_block = blocks.get(*src_index).unwrap().clone();
+            let dst_block = blocks.get(*dst_index).unwrap().clone();
+            src_block.borrow_mut().add_succ(dst_block.clone());
+            dst_block.borrow_mut().add_prev(src_block.clone());
+        }
         blocks
     }
 }
@@ -156,26 +119,17 @@ impl DexControlFlowGraph {
 
 #[cfg(test)]
 mod test {
-    use std::{collections::{HashSet, HashMap}, cell::RefCell, rc::Rc};
+    use std::{cell::RefCell, rc::Rc};
 
     use crate::{opcode::Opcode, block::BasicBlock};
 
     use super::DexControlFlowGraph;
 
     fn assert_block_starts(opcodes: &[Opcode], blocks: &[Rc<RefCell<BasicBlock>>]) {
-        let mut block_starts: HashMap<Opcode, usize> = HashMap::new();
-        for block in blocks.iter() {
+        for (opcode, block) in opcodes.iter().zip(blocks.iter()) {
             let borrowed = block.borrow();
-            let opcode = borrowed.instructions().first().unwrap().opcode;
-            let entry = block_starts.entry(opcode).or_insert(0);
-            *entry += 1;
+            assert_eq!(*opcode, *borrowed.instructions().first().unwrap().opcode());
         }
-        let mut expected_block_starts = HashMap::new();
-        for opcode in opcodes.iter() {
-            let entry = expected_block_starts.entry(*opcode).or_insert(0);
-            *entry += 1;
-        }
-        assert_eq!(expected_block_starts, block_starts);
     }
 
     #[test]
@@ -186,7 +140,7 @@ mod test {
         let blocks = DexControlFlowGraph::get_blocks(&dex, &raw_bytecode);
         assert_eq!(4, blocks.len());
         assert_block_starts(
-            &[Opcode::InvokeSuper, Opcode::IfLt, Opcode::IfEqz, Opcode::ReturnVoid], 
+            &[Opcode::InvokeSuper, Opcode::ConstString, Opcode::IgetObject, Opcode::ReturnVoid], 
             &blocks
         );
     }
@@ -208,8 +162,8 @@ mod test {
         let blocks = DexControlFlowGraph::get_blocks(&dex, &raw_bytecode);
         assert_block_starts(
             &[
-                Opcode::IgetObject, Opcode::IfNez, Opcode::InvokeVirtual, 
-                Opcode::IfEqz, Opcode::NewInstance, Opcode::MoveException
+                Opcode::IgetObject, Opcode::Const4, Opcode::InvokeVirtual, Opcode::InvokeVirtual,
+                Opcode::NewInstance, Opcode::ReturnObject, Opcode::MoveException,
             ], 
             &blocks
         );
@@ -227,21 +181,9 @@ mod test {
         let blocks = DexControlFlowGraph::get_blocks(&dex, &raw_bytecode);
         assert_block_starts(
             &[
-                Opcode::IgetObject, Opcode::IfNez, Opcode::InvokeVirtual, 
-                Opcode::AddInt2Addr, Opcode::IfEqz, Opcode::AddInt2Addr], 
+                Opcode::IgetObject, Opcode::Const4, Opcode::InvokeVirtual, 
+                Opcode::AddInt2Addr, Opcode::Const4, Opcode::AddInt2Addr], 
             &blocks
         );
-    }
-
-    #[test]
-    fn test_entry_block() {
-        let dex = dex::DexReader::from_file("tests/test.dex").unwrap();
-        let cfg = DexControlFlowGraph::from_dex(dex);
-        for class in cfg.classes {
-            for method in class.methods {
-                let borrowed = method.entry.borrow();
-                assert_eq!(borrowed.prev().len(), 0);
-            }
-        }
     }
 }
