@@ -49,16 +49,9 @@ impl DexControlFlowGraph {
         let mut classes = Vec::new();
         for class in dex.classes() {
             if let Ok(class) = class {
-                let cname = class.jtype().to_string();
                 let mut methods = Vec::new();
                 for method in class.methods() {
                     if let Some(code) = method.code() {
-                        let mname = method.name().to_string();
-                        let concat = format!("{}::{}", cname, mname);
-                        println!("{}", concat);
-                        if concat == "Lorg/fdroid/fdroid/views/main/LatestAdapter;::onCreateViewHolder" {
-                            println!("here");
-                        }
                         let raw_bytecode = code.insns();
                         let blocks = Self::get_blocks(&dex, raw_bytecode);
                         let entry = blocks.first().unwrap().clone();
@@ -122,7 +115,7 @@ impl DexControlFlowGraph {
         let mut index_mapping = HashMap::new();
         for inst in instructions.into_iter() {
             if block_starts.contains(inst.offset()) {
-                blocks.push(BasicBlock::new(*inst.offset()));
+                blocks.push(BasicBlock::new());
                 index_mapping.insert(*inst.offset(), blocks.len() - 1);
             }
             let mut current_block = blocks.last().expect("No current block").borrow_mut();
