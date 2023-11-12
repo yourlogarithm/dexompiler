@@ -53,7 +53,7 @@ impl DexControlFlowGraph {
                 for method in class.methods() {
                     if let Some(code) = method.code() {
                         let raw_bytecode = code.insns();
-                        let blocks = Self::get_blocks(&dex, raw_bytecode);
+                        let blocks = Self::get_blocks(raw_bytecode);
                         let entry = blocks.first().unwrap().clone();
                         methods.push(DexMethod { name: method.name().to_string(), entry: entry });
                     }
@@ -64,30 +64,31 @@ impl DexControlFlowGraph {
         DexControlFlowGraph { classes }
     }
 
-    fn get_blocks(dex: &Dex<impl AsRef<[u8]>>, raw_bytecode: &[u16]) -> Vec<Rc<RefCell<BasicBlock>>> {
+    fn get_blocks(raw_bytecode: &[u16]) -> Vec<Rc<RefCell<BasicBlock>>> {
         let mut instructions: Vec<Instruction> = vec![];
         let mut block_starts = vec![0 as usize];
         let mut edges = vec![];
         let mut offset = 0;
         while offset < raw_bytecode.len() {
-            if let Some(inst) = Instruction::try_from_raw_bytecode(raw_bytecode, offset, dex).unwrap() {
-                offset += *inst.length() as usize;
+            if let Some((inst, length)) = Instruction::try_from_raw_bytecode(raw_bytecode, offset).unwrap() {
+                offset += length;
+                println!("{}", *inst.opcode() as u8);
                 match *inst.opcode() as u8 {
                     0x32..=0x3D => {
                         let current_block_start = *block_starts.last().unwrap();
                         edges.push((current_block_start, offset));
-                        edges.push((current_block_start, inst.jump_target().unwrap()));
+                        edges.push((current_block_start, inst.branch_target().unwrap()));
                         block_starts.push(offset);
-                        block_starts.push(inst.jump_target().unwrap());
+                        block_starts.push(inst.branch_target().unwrap());
                         
                     },
                     0x28..=0x2A => {
                         let current_block_start = *block_starts.last().unwrap();
-                        edges.push((current_block_start, inst.jump_target().unwrap()));
-                        block_starts.push(inst.jump_target().unwrap());
+                        edges.push((current_block_start, inst.branch_target().unwrap()));
+                        block_starts.push(inst.branch_target().unwrap());
                     },
                     0x2B | 0x2C => {
-                        let jump_target = inst.jump_target().unwrap();
+                        let jump_target = inst.branch_target().unwrap();
                         let size = raw_bytecode[jump_target + 1];
                         let current_offset = *inst.offset();
                         let current_block_start = *block_starts.last().unwrap();
@@ -153,8 +154,7 @@ mod test {
     fn test_get_blocks0() {
         // Lorg/fdroid/fdroid/views/main/MainActivity;onStart
         let raw_bytecode = [4207, 743, 2, 96, 57, 275, 33, 4148, 15, 26, 21033, 8305, 855, 2, 266, 312, 7, 8532, 22998, 8302, 714, 1, 14];
-        let dex = dex::DexReader::from_file("tests/test.dex").unwrap();
-        let blocks = DexControlFlowGraph::get_blocks(&dex, &raw_bytecode);
+        let blocks = DexControlFlowGraph::get_blocks(&raw_bytecode);
         assert_eq!(4, blocks.len());
         assert_block_starts(
             &[Opcode::InvokeSuper, Opcode::ConstString, Opcode::IgetObject, Opcode::ReturnVoid], 
@@ -175,8 +175,7 @@ mod test {
             0, 780, 8302, 1810, 50, 4206, 1818, 2, 524, 12400, 
             7759, 33, 295
         ];
-        let dex = dex::DexReader::from_file("tests/test.dex").unwrap();
-        let blocks = DexControlFlowGraph::get_blocks(&dex, &raw_bytecode);
+        let blocks = DexControlFlowGraph::get_blocks(&raw_bytecode);
         assert_block_starts(
             &[
                 Opcode::IgetObject, Opcode::Const4, Opcode::InvokeVirtual, Opcode::InvokeVirtual,
@@ -194,8 +193,7 @@ mod test {
             313, 4, 274, 1320, 4206, 1757, 1, 266, 4272, 218, 7936, 
             8533, 11171, 312, 3, 4370, 4272, 15
         ];
-        let dex = dex::DexReader::from_file("tests/test.dex").unwrap();
-        let blocks = DexControlFlowGraph::get_blocks(&dex, &raw_bytecode);
+        let blocks = DexControlFlowGraph::get_blocks(&raw_bytecode);
         assert_block_starts(
             &[
                 Opcode::IgetObject, Opcode::Const4, Opcode::InvokeVirtual, 
