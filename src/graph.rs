@@ -9,9 +9,11 @@ pub(crate) fn into_blocks(dex: Dex<impl AsRef<[u8]>>) -> Vec<BlockPtr> {
         if let Ok(class) = class {
             for method in class.methods() {
                 if let Some(code) = method.code() {
-                    let b = get_blocks(code.insns());
-                    let entry = b.first().unwrap().clone();
-                    blocks.push(entry);
+                    if let Ok(b) = get_blocks(code.insns()) {
+                        blocks.push(b.first().unwrap().clone());
+                    } else {
+                        eprintln!("Error parsing method: {}", method.name());
+                    }
                 }
             }
         }
@@ -19,50 +21,55 @@ pub(crate) fn into_blocks(dex: Dex<impl AsRef<[u8]>>) -> Vec<BlockPtr> {
     blocks
 }
 
-fn get_blocks(raw_bytecode: &[u16]) -> Vec<BlockPtr> {
+fn get_blocks(raw_bytecode: &[u16]) -> Result<Vec<BlockPtr>, String> {
     let mut instructions: Vec<Instruction> = vec![];
     let mut block_starts = vec![0 as usize];
     let mut edges = vec![];
     let mut offset = 0;
     while offset < raw_bytecode.len() {
-        if let Some((inst, length)) = Instruction::try_from_raw_bytecode(raw_bytecode, offset).unwrap() {
-            offset += length;
-            match *inst.opcode() as u8 {
-                0x32..=0x3D => {
-                    let current_block_start = *block_starts.last().unwrap();
-                    edges.push((current_block_start, offset));
-                    edges.push((current_block_start, inst.branch_target().unwrap()));
-                    block_starts.push(offset);
-                    block_starts.push(inst.branch_target().unwrap());
-                    
-                },
-                0x28..=0x2A => {
-                    let current_block_start = *block_starts.last().unwrap();
-                    edges.push((current_block_start, inst.branch_target().unwrap()));
-                    block_starts.push(inst.branch_target().unwrap());
-                },
-                0x2B | 0x2C => {
-                    let jump_target = inst.branch_target().unwrap();
-                    let size = raw_bytecode[jump_target + 1];
-                    let current_offset = *inst.offset();
-                    let current_block_start = *block_starts.last().unwrap();
-                    let targets = if inst.opcode() == &Opcode::PackedSwitch {
-                        &raw_bytecode[jump_target + 4..]
-                    } else {
-                        &raw_bytecode[jump_target + 2 + size as usize * 2..]
-                    };
-                    for i in (0..(size as usize * 2)).step_by(2) {
-                        let relative_target = concat_words!(targets[i], targets[i+1]) as i32;
-                        let target = (current_offset as i32 + relative_target) as u32;
-                        block_starts.push(target as usize);
-                        edges.push((current_block_start, target as usize));
-                    }
-                },
-                _ => ()
-            }
-            instructions.push(inst);
-        } else {
-            break;
+        match Instruction::try_from_raw_bytecode(raw_bytecode, offset) {
+            Ok(Some((inst, length))) => {
+                offset += length;
+                match *inst.opcode() as u8 {
+                    0x32..=0x3D => {
+                        let current_block_start = *block_starts.last().unwrap();
+                        edges.push((current_block_start, offset));
+                        edges.push((current_block_start, inst.branch_target().unwrap()));
+                        block_starts.push(offset);
+                        block_starts.push(inst.branch_target().unwrap());
+                        
+                    },
+                    0x28..=0x2A => {
+                        let current_block_start = *block_starts.last().unwrap();
+                        edges.push((current_block_start, inst.branch_target().unwrap()));
+                        block_starts.push(inst.branch_target().unwrap());
+                    },
+                    0x2B | 0x2C => {
+                        let jump_target = inst.branch_target().unwrap();
+                        if jump_target + 1 > raw_bytecode.len() {
+                            return Err(format!("Jump target out of bounds: {}", jump_target).to_string());
+                        }
+                        let size = raw_bytecode[jump_target + 1];
+                        let current_offset = *inst.offset();
+                        let current_block_start = *block_starts.last().unwrap();
+                        let targets = if inst.opcode() == &Opcode::PackedSwitch {
+                            &raw_bytecode[jump_target + 4..]
+                        } else {
+                            &raw_bytecode[jump_target + 2 + size as usize * 2..]
+                        };
+                        for i in (0..(size as usize * 2)).step_by(2) {
+                            let relative_target = concat_words!(targets[i], targets[i+1]) as i32;
+                            let target = (current_offset as i32 + relative_target) as u32;
+                            block_starts.push(target as usize);
+                            edges.push((current_block_start, target as usize));
+                        }
+                    },
+                    _ => ()
+                }
+                instructions.push(inst);
+            },
+            Ok(None) => break,
+            Err(_) => return Err(format!("Error parsing instruction at offset: {}", offset).to_string()),
         }
     }
     let block_starts = block_starts.into_iter().collect::<HashSet<usize>>();
@@ -77,14 +84,20 @@ fn get_blocks(raw_bytecode: &[u16]) -> Vec<BlockPtr> {
         current_block.push(inst);
     }
     for (src, dst) in edges.into_iter() {
-        let src_index = index_mapping.get(&src).expect("No source index");
-        let dst_index = index_mapping.get(&dst).expect("No destination index");
-        let src_block = blocks.get(*src_index).unwrap().clone();
-        let dst_block = blocks.get(*dst_index).unwrap().clone();
+        let src_index = match index_mapping.get(&src) {
+            Some(&index) => index,
+            None => return Err(format!("No source index {}", src).to_string()),
+        };
+        let dst_index = match index_mapping.get(&dst) {
+            Some(&index) => index,
+            None => return Err(format!("No destination index {}", dst).to_string()),
+        };
+        let src_block = blocks.get(src_index).unwrap().clone();
+        let dst_block = blocks.get(dst_index).unwrap().clone();
         src_block.borrow_mut().add_succ(dst_block.clone());
         dst_block.borrow_mut().add_prev(src_block.clone());
     }
-    blocks
+    Ok(blocks)
 }
 
 
@@ -105,7 +118,7 @@ mod test {
     fn test_get_blocks0() {
         // Lorg/fdroid/fdroid/views/main/MainActivity;onStart
         let raw_bytecode = [4207, 743, 2, 96, 57, 275, 33, 4148, 15, 26, 21033, 8305, 855, 2, 266, 312, 7, 8532, 22998, 8302, 714, 1, 14];
-        let blocks = get_blocks(&raw_bytecode);
+        let blocks = get_blocks(&raw_bytecode).unwrap();
         assert_eq!(4, blocks.len());
         assert_block_starts(
             &[Opcode::InvokeSuper, Opcode::ConstString, Opcode::IgetObject, Opcode::ReturnVoid], 
@@ -126,7 +139,7 @@ mod test {
             0, 780, 8302, 1810, 50, 4206, 1818, 2, 524, 12400, 
             7759, 33, 295
         ];
-        let blocks = get_blocks(&raw_bytecode);
+        let blocks = get_blocks(&raw_bytecode).unwrap();
         assert_block_starts(
             &[
                 Opcode::IgetObject, Opcode::Const4, Opcode::InvokeVirtual, Opcode::InvokeVirtual,
@@ -144,7 +157,7 @@ mod test {
             313, 4, 274, 1320, 4206, 1757, 1, 266, 4272, 218, 7936, 
             8533, 11171, 312, 3, 4370, 4272, 15
         ];
-        let blocks = get_blocks(&raw_bytecode);
+        let blocks = get_blocks(&raw_bytecode).unwrap();
         assert_block_starts(
             &[
                 Opcode::IgetObject, Opcode::Const4, Opcode::InvokeVirtual, 
