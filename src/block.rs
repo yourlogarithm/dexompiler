@@ -1,4 +1,4 @@
-use std::{rc::Rc, cell::RefCell, fmt};
+use std::{rc::Rc, cell::RefCell, fmt, fs::File, sync::{Mutex, Arc}, io::Write, collections::HashSet};
 
 use crate::instruction::Instruction;
 
@@ -6,6 +6,7 @@ pub struct BasicBlock {
     prev: Vec<Rc<RefCell<BasicBlock>>>,
     instructions: Vec<Instruction>,
     succ: Vec<Rc<RefCell<BasicBlock>>>,
+    visited: bool,
 }
 
 impl fmt::Debug for BasicBlock {
@@ -23,7 +24,7 @@ pub(crate) type BlockPtr = Rc<RefCell<BasicBlock>>;
 impl BasicBlock {
 
     pub fn new() -> BlockPtr {
-        Rc::new(RefCell::new(Self { prev: vec![], instructions: vec![], succ: vec![] }))
+        Rc::new(RefCell::new(Self { prev: vec![], instructions: vec![], succ: vec![], visited: false }))
     }
 
     pub fn instructions(&self) -> &Vec<Instruction> {
@@ -40,5 +41,20 @@ impl BasicBlock {
 
     pub fn push(&mut self, instruction: Instruction) {
         self.instructions.push(instruction);
+    }
+
+    pub fn visit(&mut self, accumulator: &Arc<Mutex<HashSet<String>>>) {
+        self.visited = true;
+        {
+            let mut acc = accumulator.lock().unwrap();
+            acc.insert(self.instructions.iter().map(|i| format!("{}", *i.opcode() as u8)).collect::<Vec<_>>().join(" "));
+        }
+        for succ in self.succ.iter() {
+            if let Ok(mut succ) = succ.try_borrow_mut() {
+                if !succ.visited {
+                    succ.visit(accumulator);
+                }
+            }
+        }
     }
 }

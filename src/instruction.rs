@@ -111,7 +111,7 @@ mod test {
         let raw_bytecode = [8303, 921, 33];
         let (instruction, length) = Instruction::try_from_raw_bytecode(&raw_bytecode, 0).unwrap().expect("Failed to parse instruction");
         assert!(length == 3);
-        assert_eq!(instruction, Instruction { opcode: Opcode::InvokeVirtual, offset: 0, branch_target: None });
+        assert_eq!(instruction, Instruction { opcode: Opcode::InvokeSuper, offset: 0, branch_target: None });
     }
 
     #[test]
