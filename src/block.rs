@@ -1,4 +1,4 @@
-use std::{rc::Rc, cell::RefCell, fmt, fs::File, sync::{Mutex, Arc}, io::Write, collections::HashSet};
+use std::{rc::Rc, cell::RefCell, fmt, sync::{Mutex, Arc}, collections::HashSet};
 
 use crate::instruction::Instruction;
 
@@ -27,6 +27,7 @@ impl BasicBlock {
         Rc::new(RefCell::new(Self { prev: vec![], instructions: vec![], succ: vec![], visited: false }))
     }
 
+    #[allow(dead_code)]
     pub fn instructions(&self) -> &Vec<Instruction> {
         &self.instructions
     }

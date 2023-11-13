@@ -12,7 +12,7 @@ pub(crate) fn into_blocks(dex: Dex<impl AsRef<[u8]>>) -> Vec<BlockPtr> {
                     if let Ok(b) = get_blocks(code.insns()) {
                         blocks.push(b.first().unwrap().clone());
                     } else {
-                        eprintln!("Error parsing method: {}", method.name());
+                        eprintln!("Error parsing: {}::{}", class.jtype().to_java_type(), method.name());
                     }
                 }
             }
