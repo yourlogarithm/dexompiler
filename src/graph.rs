@@ -10,7 +10,9 @@ pub(crate) fn into_blocks(dex: Dex<impl AsRef<[u8]>>) -> Vec<BlockPtr> {
             for method in class.methods() {
                 if let Some(code) = method.code() {
                     if let Ok(b) = get_blocks(code.insns()) {
-                        blocks.push(b.first().unwrap().clone());
+                        if let Some(block) = b.first() {
+                            blocks.push(block.clone());
+                        }
                     } else {
                         eprintln!("Error parsing: {}::{}", class.jtype().to_java_type(), method.name());
                     }
