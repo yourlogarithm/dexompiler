@@ -1,7 +1,63 @@
-use std::{collections::{HashSet, HashMap}, vec};
+use std::collections::{HashSet, HashMap};
 
 use dex::Dex;
-use crate::{instruction::Instruction, block::{BasicBlock, BlockPtr}, opcode::Opcode, concat_words};
+mod instruction;
+mod opcode;
+mod block;
+use crate::concat_words;
+
+use self::{instruction::Instruction, block::{BlockPtr, BasicBlock}, opcode::Opcode};
+
+pub(crate) fn parse_dexes(dexes: Vec<Dex<impl AsRef<[u8]>>>) -> (Vec<u8>, Vec<(usize, usize)>) {
+    let mut op_seq = vec![]; 
+    let mut method_bounds = vec![];
+    let mut pos = 0;
+    for dex in dexes {
+        let (curr_op_seq, curr_method_bounds) = get_op_seq(dex, &mut pos);
+        op_seq.extend(curr_op_seq);
+        method_bounds.extend(curr_method_bounds);
+    }
+    (op_seq, method_bounds)
+}
+
+
+fn get_op_seq(dex: Dex<impl AsRef<[u8]>>, pos: &mut usize) -> (Vec<u8>, Vec<(usize, usize)>) {
+    let mut op_seq = vec![];
+    let mut m_bounds = vec![];
+    for class in dex.classes() {
+        if let Ok(class) = class {
+            for method in class.methods() {
+                if let Some(code) = method.code() {
+                    let raw_bytecode = code.insns();
+                    let mut offset = 0;
+                    let mut current_method_seq = vec![];
+                    let mut extend = true;
+                    let start = *pos;
+                    while offset < raw_bytecode.len() {
+                        match Instruction::try_from_raw_bytecode(raw_bytecode, offset) {
+                            Ok(Some((inst, length))) => {
+                                offset += length;
+                                current_method_seq.push(*inst.opcode() as u8);
+                            },
+                            Ok(None) => break,
+                            Err(_) => {
+                                // eprintln!("Error parsing: {}::{}", class.jtype().to_java_type(), method.name());
+                                extend = false;
+                                break;
+                            },
+                        }
+                    }
+                    if extend {
+                        *pos += current_method_seq.len();
+                        m_bounds.push((start, *pos));
+                        op_seq.extend(current_method_seq);
+                    }
+                }
+            }
+        }
+    }
+    (op_seq, m_bounds)
+}
 
 pub(crate) fn into_blocks(dex: Dex<impl AsRef<[u8]>>) -> Vec<BlockPtr> {
     let mut blocks = vec![];
@@ -107,7 +163,7 @@ fn get_blocks(raw_bytecode: &[u16]) -> Result<Vec<BlockPtr>, String> {
 mod test {
     use std::{cell::RefCell, rc::Rc};
     use super::get_blocks;
-    use crate::{opcode::Opcode, block::BasicBlock};
+    use super::{opcode::Opcode, block::BasicBlock};
 
     fn assert_block_starts(opcodes: &[Opcode], blocks: &[Rc<RefCell<BasicBlock>>]) {
         for (opcode, block) in opcodes.iter().zip(blocks.iter()) {

@@ -3,7 +3,7 @@ use std::error::Error;
 
 use num_traits::FromPrimitive;
 
-use crate::opcode::Opcode;
+use super::opcode::Opcode;
 
 
 #[macro_export]

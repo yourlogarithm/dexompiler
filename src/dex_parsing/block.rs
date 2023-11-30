@@ -1,8 +1,8 @@
 use std::{rc::Rc, cell::RefCell, fmt, sync::{Mutex, Arc}, collections::HashSet};
 
-use crate::instruction::Instruction;
+use super::instruction::Instruction;
 
-pub struct BasicBlock {
+pub(crate) struct BasicBlock {
     prev: Vec<Rc<RefCell<BasicBlock>>>,
     instructions: Vec<Instruction>,
     succ: Vec<Rc<RefCell<BasicBlock>>>,
