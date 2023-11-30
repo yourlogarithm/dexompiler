@@ -1,4 +1,5 @@
 use clap::Parser;
+use num_cpus;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -12,6 +13,6 @@ pub struct Args {
     pub input: Vec<String>,
 
     /// Number of threads to use
-    #[arg(short, long, default_value_t = 20)]
+    #[arg(short, long, default_value_t = num_cpus::get())]
     pub threads: usize,
 }
