@@ -90,13 +90,13 @@ fn parse_apk(path: &str) -> Result<(Vec<Dex<impl AsRef<[u8]>>>, Option<Vec<Strin
 fn main() {
     let args: Args = Args::parse();
 
-    println!("Parsing {} files using {} threads", args.input.len(), args.threads);
+    println!("Parsing {} files up to {} opcodes, using {} threads", args.input.len(), args.sequence_cap, args.threads);
 
     rayon::ThreadPoolBuilder::new().num_threads(args.threads).build_global().unwrap();
     let accumulator = Arc::new(MutexWrapper(Mutex::new(HashMap::new())));
     args.input.par_iter().progress_count(args.input.len() as u64).for_each(|path| {
         if let Ok((dexes, permissions)) = parse_apk(path) {
-            let (op_seq, method_bounds) = parse_dexes(dexes);
+            let (op_seq, method_bounds) = parse_dexes(dexes, args.sequence_cap);
             let mut accumulator = accumulator.0.lock().unwrap();
             accumulator.insert(path, (op_seq, method_bounds, permissions));
         } else {

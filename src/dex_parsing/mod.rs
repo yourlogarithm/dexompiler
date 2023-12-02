@@ -8,12 +8,12 @@ use crate::concat_words;
 
 use self::{instruction::Instruction, block::{BlockPtr, BasicBlock}, opcode::Opcode};
 
-pub(crate) fn parse_dexes(dexes: Vec<Dex<impl AsRef<[u8]>>>) -> (Vec<u8>, Vec<(usize, usize)>) {
+pub(crate) fn parse_dexes(dexes: Vec<Dex<impl AsRef<[u8]>>>, sequence_cap: usize) -> (Vec<u8>, Vec<(usize, usize)>) {
     let mut op_seq = vec![]; 
     let mut method_bounds = vec![];
     let mut pos = 0;
     for dex in dexes {
-        let (curr_op_seq, curr_method_bounds) = get_op_seq(dex, &mut pos);
+        let (curr_op_seq, curr_method_bounds) = get_op_seq(dex, &mut pos, sequence_cap);
         op_seq.extend(curr_op_seq);
         method_bounds.extend(curr_method_bounds);
     }
@@ -21,7 +21,7 @@ pub(crate) fn parse_dexes(dexes: Vec<Dex<impl AsRef<[u8]>>>) -> (Vec<u8>, Vec<(u
 }
 
 
-fn get_op_seq(dex: Dex<impl AsRef<[u8]>>, pos: &mut usize) -> (Vec<u8>, Vec<(usize, usize)>) {
+fn get_op_seq(dex: Dex<impl AsRef<[u8]>>, pos: &mut usize, sequence_cap: usize) -> (Vec<u8>, Vec<(usize, usize)>) {
     let mut op_seq = vec![];
     let mut m_bounds = vec![];
     for class in dex.classes() {
@@ -31,9 +31,13 @@ fn get_op_seq(dex: Dex<impl AsRef<[u8]>>, pos: &mut usize) -> (Vec<u8>, Vec<(usi
                     let raw_bytecode = code.insns();
                     let mut offset = 0;
                     let mut current_method_seq = vec![];
-                    let mut extend = true;
+                    let mut do_extend = true;
                     let start = *pos;
                     while offset < raw_bytecode.len() {
+                        if sequence_cap > 0 && op_seq.len() + current_method_seq.len() >= sequence_cap {
+                            extend(&mut op_seq, current_method_seq, &mut m_bounds, pos, start);
+                            return (op_seq, m_bounds);
+                        }
                         match Instruction::try_from_raw_bytecode(raw_bytecode, offset) {
                             Ok(Some((inst, length))) => {
                                 offset += length;
@@ -42,21 +46,28 @@ fn get_op_seq(dex: Dex<impl AsRef<[u8]>>, pos: &mut usize) -> (Vec<u8>, Vec<(usi
                             Ok(None) => break,
                             Err(_) => {
                                 // eprintln!("Error parsing: {}::{}", class.jtype().to_java_type(), method.name());
-                                extend = false;
+                                do_extend = false;
                                 break;
                             },
                         }
                     }
-                    if extend {
-                        *pos += current_method_seq.len();
-                        m_bounds.push((start, *pos));
-                        op_seq.extend(current_method_seq);
+                    if do_extend {
+                        extend(&mut op_seq, current_method_seq, &mut m_bounds, pos, start)
                     }
                 }
             }
         }
+        if sequence_cap > 0 && op_seq.len() >= sequence_cap {
+            return (op_seq, m_bounds);
+        }
     }
     (op_seq, m_bounds)
+}
+
+fn extend(op_seq: &mut Vec<u8>, current_method_seq: Vec<u8>, m_bounds: &mut Vec<(usize, usize)>, pos: &mut usize, start: usize) {
+    *pos += current_method_seq.len();
+    m_bounds.push((start, *pos - 1));
+    op_seq.extend(current_method_seq);
 }
 
 pub(crate) fn into_blocks(dex: Dex<impl AsRef<[u8]>>) -> Vec<BlockPtr> {
