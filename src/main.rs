@@ -97,8 +97,10 @@ fn main() {
     args.input.par_iter().progress_count(args.input.len() as u64).for_each(|path| {
         if let Ok((dexes, permissions)) = parse_apk(path) {
             let (op_seq, method_bounds) = parse_dexes(dexes, args.sequence_cap);
-            let mut accumulator = accumulator.0.lock().unwrap();
-            accumulator.insert(path, (op_seq, method_bounds, permissions));
+            if !op_seq.is_empty() {
+                let mut accumulator = accumulator.0.lock().unwrap();
+                accumulator.insert(path, (op_seq, method_bounds, permissions));
+            }
         } else {
             eprintln!("Error parsing: {}", path);
         }
