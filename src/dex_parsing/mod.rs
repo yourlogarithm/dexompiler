@@ -34,10 +34,6 @@ fn get_op_seq(dex: Dex<impl AsRef<[u8]>>, pos: &mut usize, sequence_cap: usize) 
                     let mut do_extend = true;
                     let start = *pos;
                     while offset < raw_bytecode.len() {
-                        if sequence_cap > 0 && op_seq.len() + current_method_seq.len() >= sequence_cap {
-                            extend(&mut op_seq, current_method_seq, &mut m_bounds, pos, start);
-                            return (op_seq, m_bounds);
-                        }
                         match Instruction::try_from_raw_bytecode(raw_bytecode, offset) {
                             Ok(Some((inst, length))) => {
                                 offset += length;
@@ -51,14 +47,11 @@ fn get_op_seq(dex: Dex<impl AsRef<[u8]>>, pos: &mut usize, sequence_cap: usize) 
                             },
                         }
                     }
-                    if do_extend {
+                    if do_extend && (sequence_cap == 0 || op_seq.len() + current_method_seq.len() < sequence_cap) {
                         extend(&mut op_seq, current_method_seq, &mut m_bounds, pos, start)
                     }
                 }
             }
-        }
-        if sequence_cap > 0 && op_seq.len() >= sequence_cap {
-            return (op_seq, m_bounds);
         }
     }
     (op_seq, m_bounds)
@@ -103,18 +96,20 @@ fn get_blocks(raw_bytecode: &[u16]) -> Result<Vec<BlockPtr>, String> {
                     0x32..=0x3D => {
                         let current_block_start = *block_starts.last().unwrap();
                         edges.push((current_block_start, offset));
-                        edges.push((current_block_start, inst.branch_target().unwrap()));
+                        let jump_target = *inst.dest().as_ref().unwrap().as_branch_target().unwrap();
+                        edges.push((current_block_start, jump_target));
                         block_starts.push(offset);
-                        block_starts.push(inst.branch_target().unwrap());
+                        block_starts.push(jump_target);
                         
                     },
                     0x28..=0x2A => {
                         let current_block_start = *block_starts.last().unwrap();
-                        edges.push((current_block_start, inst.branch_target().unwrap()));
-                        block_starts.push(inst.branch_target().unwrap());
+                        let jump_target = *inst.dest().as_ref().unwrap().as_branch_target().unwrap();
+                        edges.push((current_block_start, jump_target));
+                        block_starts.push(jump_target);
                     },
                     0x2B | 0x2C => {
-                        let jump_target = inst.branch_target().unwrap();
+                        let jump_target = *inst.dest().as_ref().unwrap().as_branch_target().unwrap();
                         if jump_target + 1 > raw_bytecode.len() {
                             return Err(format!("Jump target out of bounds: {}", jump_target).to_string());
                         }

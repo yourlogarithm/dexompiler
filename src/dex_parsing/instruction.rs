@@ -44,13 +44,36 @@ impl fmt::Display for InstructionParsingError {
 
 
 #[derive(Debug, PartialEq)]
+pub enum Dest {
+    BranchTarget(usize),
+    MethodId(usize)
+}
+
+impl Dest {
+    pub fn as_branch_target(&self) -> Option<&usize> {
+        match self {
+            Dest::BranchTarget(target) => Some(target),
+            _ => None
+        }
+    }
+
+    pub fn as_method_id(&self) -> Option<&usize> {
+        match self {
+            Dest::MethodId(id) => Some(id),
+            _ => None
+        }
+    }
+}
+
+
+#[derive(Debug, PartialEq)]
 pub struct Instruction {
     /// The opcode of the instruction
     opcode: Opcode,
     /// The offset of the instruction in the method bytecode
     offset: usize,
-    /// Branch target of the instruction
-    branch_target: Option<usize>,
+    /// Destination of instruction, if any
+    dest: Option<Dest>,
 }
 
 
@@ -60,7 +83,7 @@ impl Instruction {
         let (opcode_byte, immediate_args) = split_word!(raw_bytecode[0]);
         let opcode: Opcode = FromPrimitive::from_u8(opcode_byte).ok_or(InstructionParsingError { byte: opcode_byte, offset: offset })?;
 
-        let (length, branch_target) = match opcode_byte {
+        let (length, dest) = match opcode_byte {
             0x0 => {
                 if (1..=3).contains(&immediate_args) {
                     return Ok(None);
@@ -74,33 +97,40 @@ impl Instruction {
                 }
                 (2, None)
             },
-            0x03 | 0x06 | 0x09 | 0x14 | 0x17 | 0x1B | 0x24..=0x26 | 0x6E..=0x72 | 0x74..=0x78 | 0xFC | 0xFD => {
+            0x03 | 0x06 | 0x09 | 0x14 | 0x17 | 0x1B | 0x24..=0x26 | 0xFC | 0xFD => {
                 if raw_bytecode.len() < 3 {
                     return Err(InstructionParsingError { byte: opcode_byte, offset: offset });
                 }
                 (3, None)
             },
-            0xFA | 0xFB => (4, None),
+            0x6e..=0x72 | 0x74..=0x78 => {
+                if raw_bytecode.len() < 3 {
+                    return Err(InstructionParsingError { byte: opcode_byte, offset: offset });
+                }
+                (3, Some(Dest::MethodId(raw_bytecode[2] as usize)))
+            },
+            0xFA | 0xFB => (4, Some(Dest::MethodId(raw_bytecode[2] as usize))),
             0x18 => (5, None),
-            0x28 => (1, Some(immediate_args as i8 as i32)),
-            0x29 => (2, Some(immediate_args as i16 as i32)),
+            0x28 => (1, Some(Dest::BranchTarget(((immediate_args as i8 as i32) + offset as i32) as usize))),
+            0x29 => (2, Some(Dest::BranchTarget(((immediate_args as i16 as i32) + offset as i32) as usize))),
             0x2A => {
                 if raw_bytecode.len() < 3 {
                     return Err(InstructionParsingError { byte: opcode_byte, offset: offset });
                 }
-                (3, Some(concat_words!(raw_bytecode[1], raw_bytecode[2]) as i32))
+                ;
+                (3, Some(Dest::BranchTarget((concat_words!(raw_bytecode[1], raw_bytecode[2]) as i32 + offset as i32) as usize)))
             },
             0x2B | 0x2C => {
                 if raw_bytecode.len() < 3 {
                     return Err(InstructionParsingError { byte: opcode_byte, offset: offset });
                 }
-                (3, Some(concat_words!(raw_bytecode[1], raw_bytecode[2]) as i32))
+                (3, Some(Dest::BranchTarget((concat_words!(raw_bytecode[1], raw_bytecode[2]) as i32 + offset as i32) as usize)))
             },
             0x32..=0x3D => {
                 if raw_bytecode.len() < 2 {
                     return Err(InstructionParsingError { byte: opcode_byte, offset: offset });
                 }
-                (2, Some(raw_bytecode[1] as i16 as i32))
+                (2, Some(Dest::BranchTarget(((raw_bytecode[1] as i16 as i32) + offset as i32) as usize)))
             },
             0x3e..=0x43 | 0x73 | 0x79..=0x7a | 0xe3..=0xf9 => {
                 return Err(InstructionParsingError { byte: opcode_byte, offset: offset });
@@ -109,11 +139,7 @@ impl Instruction {
         if length > raw_bytecode.len() {
             return Err(InstructionParsingError { byte: opcode_byte, offset: offset });
         }
-        let branch_target = match branch_target {
-            Some(target) => Some((target + offset as i32) as usize),
-            None => None
-        };
-        Ok(Some((Instruction { opcode, offset, branch_target }, length)))
+        Ok(Some((Instruction { opcode, offset, dest }, length)))
     }
 
     pub fn opcode(&self) -> &Opcode {
@@ -124,8 +150,8 @@ impl Instruction {
         &self.offset
     }
 
-    pub fn branch_target(&self) -> &Option<usize> {
-        &self.branch_target
+    pub fn dest(&self) -> &Option<Dest> {
+        &self.dest
     }
 }
 
@@ -139,7 +165,7 @@ mod test {
         let raw_bytecode = [8303, 921, 33];
         let (instruction, length) = Instruction::try_from_raw_bytecode(&raw_bytecode, 0).unwrap().expect("Failed to parse instruction");
         assert!(length == 3);
-        assert_eq!(instruction, Instruction { opcode: Opcode::InvokeSuper, offset: 0, branch_target: None });
+        assert_eq!(instruction, Instruction { opcode: Opcode::InvokeSuper, offset: 0, dest: Some(Dest::MethodId(33)) });
     }
 
     #[test]
@@ -147,7 +173,7 @@ mod test {
         let raw_bytecode = [45874, 102];
         let (instruction, length) = Instruction::try_from_raw_bytecode(&raw_bytecode, 0).unwrap().expect("Failed to parse instruction");
         assert_eq!(length, 2);
-        assert_eq!(instruction, Instruction { opcode: Opcode::IfEq, offset: 0, branch_target: Some(102) });
+        assert_eq!(instruction, Instruction { opcode: Opcode::IfEq, offset: 0, dest: Some(Dest::BranchTarget(102)) });
     }
 
     #[test]
@@ -155,6 +181,6 @@ mod test {
         let raw_bytecode = [290, 648];
         let (instruction, length) = Instruction::try_from_raw_bytecode(&raw_bytecode, 0).unwrap().expect("Failed to parse instruction");
         assert_eq!(length, 2);
-        assert_eq!(instruction, Instruction { opcode: Opcode::NewInstance, offset: 0, branch_target: None });
+        assert_eq!(instruction, Instruction { opcode: Opcode::NewInstance, offset: 0, dest: None });
     }
 }
