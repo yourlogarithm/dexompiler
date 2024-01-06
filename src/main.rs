@@ -4,7 +4,7 @@ mod cli;
 
 use clap::Parser;
 use manifest_parsing::parse_permissions;
-use dex_parsing::parse_dexes;
+use dex_parsing::Instruction;
 use cli::Args;
 
 use std::{fs::{OpenOptions, self}, sync::{Mutex, Arc}, collections::HashMap, io::Read, fmt, error::Error};
@@ -95,12 +95,39 @@ fn main() {
     rayon::ThreadPoolBuilder::new().num_threads(args.threads).build_global().unwrap();
     let accumulator = Arc::new(MutexWrapper(Mutex::new(HashMap::new())));
     args.input.par_iter().progress_count(args.input.len() as u64).for_each(|path| {
-        if let Ok((dexes, permissions)) = parse_apk(path) {
-            let (op_seq, method_bounds) = parse_dexes(dexes, args.sequence_cap);
-            if !op_seq.is_empty() {
-                let mut accumulator = accumulator.0.lock().unwrap();
-                accumulator.insert(path, (op_seq, method_bounds, permissions));
+        if let Ok(dex) = DexReader::from_file(path) {
+            let mut instruction_sequence = vec![];
+            for class in dex.classes() {
+                match class {
+                    Ok(class) => {
+                        for method in class.methods() {
+                            match method.code() {
+                                Some(code) => {
+                                    let raw_bytecode = code.insns();
+                                    let mut offset = 0;
+                                    while offset < raw_bytecode.len() {
+                                        match Instruction::try_from_raw_bytecode(raw_bytecode, &mut offset) {
+                                            Ok(Some(inst)) => instruction_sequence.push(inst),
+                                            Ok(None) => break,
+                                            Err(_) => {
+                                                eprintln!("Error parsing: {}::{}", class.jtype().to_java_type(), method.name());
+                                                break;
+                                            },
+                                        }
+                                    }
+                                },
+                                _ => continue
+                            }
+                        }
+                    }
+                    _ => continue
+                }
             }
+            // let (op_seq, method_bounds) = parse_dexes(dexes, args.sequence_cap);
+            // if !op_seq.is_empty() {
+            let mut accumulator = accumulator.0.lock().unwrap();
+            accumulator.insert(path, instruction_sequence);
+            // }
         } else {
             eprintln!("Error parsing: {}", path);
         }
@@ -115,5 +142,5 @@ fn main() {
         .unwrap();
     let buffered_file = BufWriter::new(file);
 
-    serde_json::to_writer(buffered_file, &accumulator).unwrap();
+    // serde_json::to_writer(buffered_file, &accumulator).unwrap();
 }

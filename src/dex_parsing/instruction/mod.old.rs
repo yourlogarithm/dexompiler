@@ -1,9 +1,11 @@
-use core::fmt;
-use std::error::Error;
+mod opcode;
+mod error;
+mod intermediate;
 
 use num_traits::FromPrimitive;
+use opcode::Opcode;
 
-use super::opcode::Opcode;
+use self::error::InstructionParsingError;
 
 
 #[macro_export]
@@ -25,21 +27,6 @@ macro_rules! split_word {
     ($word:expr) => {
         (($word & 0xff) as _, ($word >> 8) as _)
     };
-}
-
-
-#[derive(Debug)]
-pub struct InstructionParsingError {
-    byte: u8,
-    offset: usize,
-}
-
-impl Error for InstructionParsingError {}
-
-impl fmt::Display for InstructionParsingError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Invalid instruction at offset {}: {}", self.offset, self.byte)
-    }
 }
 
 
